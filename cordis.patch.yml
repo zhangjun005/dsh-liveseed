@@ -1,0 +1,6 @@
+# Package bundle: resolved by package name after installation into a DSH profile.
+- insert:
+    - id: liveseed
+      name: dsh-liveseed
+      # Configure an absolute stateDir in the target profile before enabling.
+      disabled: true

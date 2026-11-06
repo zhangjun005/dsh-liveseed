@@ -1,0 +1,6 @@
+allowBuilds:
+  # Transitive optional native integration; no desktop or shell tools are mounted.
+  koffi: false
+  esbuild: true
+overrides:
+  zod: 4.4.3

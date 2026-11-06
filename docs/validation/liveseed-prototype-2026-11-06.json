@@ -1,0 +1,41 @@
+{
+  "date": "2026-11-06",
+  "versions": {
+    "node": "22.23.3",
+    "cordis": "4.0.5",
+    "pnpm": "11.25.0",
+    "dsh": "0.2.0-rc.2"
+  },
+  "checkPassed": true,
+  "integration": {
+    "stop": true,
+    "hostToolCalls": 0,
+    "busyRejected": true,
+    "restart": true,
+    "hostSessionIsolation": true,
+    "failureRecovery": true,
+    "durableRetry": true
+  },
+  "browser": {
+    "passed": true,
+    "anonymous": 401,
+    "missingHeader": 403,
+    "foreignSession": 400,
+    "restartRestored": true,
+    "stopWorked": true,
+    "browserErrors": [],
+    "nativeListExcludesCompanion": true,
+    "nativeSearchExcludesCompanion": true,
+    "realModelCalls": 0
+  },
+  "browserArtifacts": ".local/web-acceptance-rcp71i",
+  "integrationArtifacts": ".local/integration-oeUcUE",
+  "realModelCalls": 0,
+  "existingProfileChanged": false,
+  "limitations": [
+    "Synthetic model only",
+    "No automatic context compression or long-term memory",
+    "Single writer per stateDir",
+    "Only stated DSH version verified"
+  ]
+}

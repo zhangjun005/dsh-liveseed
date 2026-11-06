@@ -1,0 +1,32 @@
+[
+  {
+    "source": "E:\\works\\NlpForAmphoreus\\docs\\德谬歌\\00-可行性方案.md",
+    "target": "docs/references/历史讨论/00-可行性方案.md",
+    "copied_at": "2026-11-06",
+    "sha256": "e2fa86a054499e12973d17949fa1ced75dcd7bac51b6d4459b786e5d154ba000"
+  },
+  {
+    "source": "E:\\works\\NlpForAmphoreus\\docs\\德谬歌\\01-想法记录-2026-10-27.md",
+    "target": "docs/references/历史讨论/01-想法记录-2026-10-27.md",
+    "copied_at": "2026-11-06",
+    "sha256": "f5acb1dbcc1711d85e8c11e2b474b877b4ffde6b39b548aae992219fc4321050"
+  },
+  {
+    "source": "E:\\works\\NlpForAmphoreus\\docs\\德谬歌\\02-MaiBot核心模块观察.md",
+    "target": "docs/references/历史讨论/02-MaiBot核心模块观察.md",
+    "copied_at": "2026-11-06",
+    "sha256": "a45541c8fe455f861098a0fdaa8536ae070ddf13ea1b6175b9b704a1e677d9a5"
+  },
+  {
+    "source": "E:\\works\\NlpForAmphoreus\\docs\\德谬歌\\03-架构草案-v1.md",
+    "target": "docs/references/历史讨论/03-架构草案-v1.md",
+    "copied_at": "2026-11-06",
+    "sha256": "b3df9eaee55c9ece2706a589c168a9021a590fa0ba6852ea483904e787a6947e"
+  },
+  {
+    "source": "E:\\otherWork\\docs\\2026-11-03-DeepSeek-Super-agent机制详解\\DeepSeek-Super-agent实现机制详解.md",
+    "target": "docs/references/DeepSeek-Super-agent实现机制详解.md",
+    "copied_at": "2026-11-06",
+    "sha256": "6be0aef7931ea5697efdfca99741153137e2737d54d8938b82934f29e0ef88d4"
+  }
+]

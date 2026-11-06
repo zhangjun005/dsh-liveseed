@@ -1,0 +1,41 @@
+{
+  "date": "2026-11-06",
+  "dsh": "0.2.0-rc.2",
+  "model": "synthetic fixture adapter via native host LLM bridge",
+  "realModelCalls": 0,
+  "commands": {
+    "pnpm install --frozen-lockfile --ignore-scripts": "passed",
+    "pnpm check": "passed: typecheck, server/client build, loader smoke, 5 native/core integration tests",
+    "pnpm test:browser": "passed: isolated DSH_HOME and authenticated Web client",
+    "npm pack --dry-run --ignore-scripts --json": "passed: module README and narrative template included"
+  },
+  "artifacts": {
+    "integration": ".local/integration-xFRPXN",
+    "memory": ".local/memory-dPNvcH",
+    "browser": ".local/web-acceptance-ya8E32"
+  },
+  "covered": [
+    "native evidence and separate provider reasoning / explicit understanding",
+    "version conflict, duplicate acceptance and forged reference rejection",
+    "main active recall, introspection, protected evidence and host-tool isolation",
+    "independent long-lived worker Session and code-only native audit Session",
+    "maintenance dialogue, narrative projection and restart rebuild without model calls",
+    "archival removes stale narrative, tool results and working dialogue from next context",
+    "daily native Session activation, bounded handoff and cross-segment receipt restore",
+    "native worker manual compaction and main pressure compaction",
+    "one native context-overflow recovery without duplicating user input",
+    "failed proposal recovery, cancelled maintenance not replayed, persistence failure not published",
+    "Web mode switch, maintenance chat restart restore, authentication and normal list/search exclusion"
+  ],
+  "notImplemented": [
+    "automatic soul modification",
+    "physical deletion",
+    "other-workspace prompt observation and 15-second proactive expression",
+    "Live2D or 3D runtime"
+  ],
+  "notMeasured": [
+    "real DeepSeek consolidation quality",
+    "long soul token budget on real provider routes",
+    "very large historical-log performance"
+  ]
+}

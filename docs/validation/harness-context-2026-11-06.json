@@ -1,0 +1,103 @@
+{
+  "checkedAt": "2026-11-06T06:42:06.745Z",
+  "runRoot": "E:\\works\\LiveSeed\\.local\\context-probe-gIya5B",
+  "hostRoot": "D:\\nodejs\\npm-global\\node_modules\\@deepseek-ai\\dsh",
+  "evidence": {
+    "dsh": {
+      "version": "0.2.0-rc.2",
+      "entry": "D:\\nodejs\\npm-global\\node_modules\\@deepseek-ai\\dsh\\lib\\profile-boot.js",
+      "sha256": "c53d4e2caf21428e263b525e657dafaf63fd183f7ef016aabda56af7998b6c4f"
+    },
+    "cordis": {
+      "version": "4.0.5",
+      "entry": "D:\\nodejs\\npm-global\\node_modules\\@deepseek-ai\\dsh\\node_modules\\@deepseek-ai\\cordis\\lib\\index.js",
+      "sha256": "6a9394c0877ff45218818c6e815edd038f8057e1a1deb390a8d43ec81c57691e"
+    },
+    "dsh-session": {
+      "version": "0.2.0-rc.2",
+      "entry": "D:\\nodejs\\npm-global\\node_modules\\@deepseek-ai\\dsh\\node_modules\\@deepseek-ai\\dsh-session\\lib\\index.js",
+      "sha256": "87ea85e2fb5318bf1f826db9a1c88c1b26d3ea328027a7f32b211880c4d62b9d"
+    },
+    "dsh-agent-loop": {
+      "version": "0.2.0-rc.2",
+      "entry": "D:\\nodejs\\npm-global\\node_modules\\@deepseek-ai\\dsh\\node_modules\\@deepseek-ai\\dsh-agent-loop\\lib\\index.js",
+      "sha256": "00c4814d63f3d1e2754eb09144832d19b30499d6ea444730473f740b587948c2"
+    },
+    "dsh-session-projection": {
+      "version": "0.2.0-rc.2",
+      "entry": "D:\\nodejs\\npm-global\\node_modules\\@deepseek-ai\\dsh\\node_modules\\@deepseek-ai\\dsh-session-projection\\lib\\index.js",
+      "sha256": "022f1d13e25aeb3c18e10407d84c69e018c1c05a65c9ee36ed14d89b185a4fa8"
+    },
+    "dsh-workspace": {
+      "version": "0.2.0-rc.2",
+      "entry": "D:\\nodejs\\npm-global\\node_modules\\@deepseek-ai\\dsh\\node_modules\\@deepseek-ai\\dsh-workspace\\lib\\index.js",
+      "sha256": "a33af459cfc7af29dd17412443a63655fd5037dd348b0dec20a413ce60c6c8bc"
+    },
+    "dsh-api-session-controller": {
+      "version": "0.2.0-rc.2",
+      "entry": "D:\\nodejs\\npm-global\\node_modules\\@deepseek-ai\\dsh\\node_modules\\@deepseek-ai\\dsh-api-session-controller\\lib\\index.js",
+      "sha256": "fb0f7b96130f595db20809eeb77a195b05f4a039f931d1e67692f1f74a4dd269"
+    },
+    "dsh-client-ui-workspace": {
+      "version": "0.2.0-rc.2",
+      "entry": "D:\\nodejs\\npm-global\\node_modules\\@deepseek-ai\\dsh\\node_modules\\@deepseek-ai\\dsh-client-ui-workspace\\lib\\index.js",
+      "sha256": "e6cdc4b725585354102a5c4598c9d8c79d6abac62d7979c09919821716370438"
+    }
+  },
+  "results": [
+    {
+      "name": "native loop + scoped context + tool continuation",
+      "status": "passed",
+      "modelCalls": 2,
+      "customAgentLoop": false,
+      "externalModelCalls": 0
+    },
+    {
+      "name": "context replacement retains raw evidence",
+      "status": "passed",
+      "oldSnapshotRetained": true,
+      "oldSnapshotInContext": false
+    },
+    {
+      "name": "dedicated ID in shared store remains listed and searchable",
+      "status": "passed",
+      "hidden": false,
+      "listed": true,
+      "searchable": true,
+      "workspaceAttached": false
+    },
+    {
+      "name": "archive rejects a running companion",
+      "status": "passed",
+      "archiveIsVisibilityOnly": false
+    },
+    {
+      "name": "surface summary + JSONL restore + projection rebuild",
+      "status": "passed",
+      "exactSurfaceRestored": true,
+      "projectionRebuiltFromLog": true,
+      "automaticCompactionAlgorithmTested": false
+    },
+    {
+      "name": "same process with separate native containers excludes companion from ordinary corpus",
+      "status": "passed",
+      "sameProcess": true,
+      "nativeLogAndLoop": true,
+      "ordinaryCorpusContainsCompanion": false,
+      "uiEndToEndTested": false,
+      "permissionsBridgeImplemented": false
+    },
+    {
+      "name": "direct ctx.isolate full native stack",
+      "status": "blocked",
+      "error": "cannot get property \"sessionProjections\" without inject",
+      "hostPatched": false
+    }
+  ],
+  "modelCalls": 7,
+  "externalModelCalls": 0,
+  "expectedBlockedDiagnostics": [
+    "Error: cannot get property \"sessionProjections\" without inject"
+  ],
+  "scope": "Synthetic in-process service composition; no real DSH Web UI, profile, credential, or model integration."
+}

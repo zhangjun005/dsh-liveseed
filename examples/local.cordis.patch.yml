@@ -1,0 +1,7 @@
+# Development-only overlay for this checkout. Build before loading.
+# An overlay does not change the loader's package resolution root.
+- insert:
+    - id: liveseed
+      name: 'file:///E:/works/LiveSeed/dist/index.js'
+      config:
+        stateDir: 'E:/works/LiveSeed/data/liveseed'

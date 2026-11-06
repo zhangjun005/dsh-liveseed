@@ -1,0 +1,16 @@
+# Isolated acceptance profile only: synthetic model, no real API calls.
+- id: session-query-sqlite
+  config:
+    path: ':memory:'
+    openAt: first-search
+- id: agent-default-model
+  config:
+    provider: fixture
+    model: fixture-chat
+- insert:
+    - id: liveseed-test-model
+      name: 'file:///E:/works/LiveSeed/scripts/testing/host-fixture.mjs'
+    - id: liveseed
+      name: 'file:///E:/works/LiveSeed/dist/index.js'
+      config:
+        stateDir: !!js process.env.LIVESEED_TEST_DATA

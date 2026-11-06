@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.tsbuildinfo
+*.tgz
+.env
+.env.*
+!.env.example
+.local/
+.dsh-home/
+data/
+logs/
+coverage/
