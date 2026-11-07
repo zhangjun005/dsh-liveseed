@@ -6,6 +6,7 @@ import { appendFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { newBluePixels } from './pixels.mjs';
 
 if (!process.env.LIVESEED_DSH_ROOT) throw new Error('Set LIVESEED_DSH_ROOT.');
 await mkdir('.local', { recursive: true });
@@ -89,13 +90,30 @@ try {
   assert.equal(names.length, 84);
   for (const name of names) {
     await morph.selectOption(name);
-    await page.waitForFunction(name => { const data = document.querySelector('canvas[data-character-canvas]')?.dataset; return data?.characterMorphWeight === '0.5' && data.characterMorphName === name; }, name);
+    await page.waitForFunction(name => { const data = document.querySelector('canvas[data-character-canvas]')?.dataset; return data?.characterMorphWeight === '1' && data.characterMorphName === name; }, name);
   }
   await morph.selectOption('照れ');
   await page.waitForFunction(() => Number(document.querySelector('canvas[data-character-canvas]')?.dataset.characterMaterialChange) > 0);
   const materialChange = Number(await canvas.getAttribute('data-character-material-change'));
   await settings.getByRole('button', { name: '清除表情', exact: true }).click();
   await page.waitForFunction(() => Number(document.querySelector('canvas[data-character-canvas]')?.dataset.characterMaterialChange) === 0);
+  // MMD symbol Morphs (汗 / ！ / ？) move a hidden quad out of the hair, so they need the full
+  // preview weight. Verify the pixels, not only the written influence: the previous 0.5 default
+  // applied the weight while the drop stayed behind the hair.
+  await page.getByRole('button', { name: '关闭德谬歌设置', exact: true }).click();
+  await delay(500);
+  const cleanShot = await stage.screenshot();
+  await page.getByRole('button', { name: '德谬歌设置', exact: true }).click();
+  await settings.getByLabel('表情预览', { exact: true }).selectOption('汗');
+  await delay(800);
+  await page.getByRole('button', { name: '关闭德谬歌设置', exact: true }).click();
+  await delay(500);
+  const symbolShot = await stage.screenshot();
+  const symbolPixels = newBluePixels(cleanShot, symbolShot);
+  assert.ok(symbolPixels >= 20, 'displacement symbol Morph is visible at the default preview weight, new blue pixels=' + symbolPixels);
+  await page.screenshot({ path: join(folder, 'symbol-morph.png') });
+  await page.getByRole('button', { name: '德谬歌设置', exact: true }).click();
+  await settings.getByRole('button', { name: '清除表情', exact: true }).click();
   for (const label of ['轻点头', '轻挥手', '身体侧倾', '重心移动', '腿部轻摆']) {
     await settings.getByRole('button', { name: label, exact: true }).click(); await delay(100);
   }
@@ -133,7 +151,7 @@ try {
   await page.screenshot({ path: join(folder, 'character.png') });
   assert.deepEqual(errors, [], 'no uncaught browser errors');
   assert.ok(!consoleErrors.some(line => /shader error|shader_error|error validating|compilation failed/i.test(line)), 'no shader failures');
-  await writeFile(join(folder, 'result.json'), JSON.stringify({ bones: 493, morphs: names.length, materialMorphs: 3, materialChange, performanceWithoutPhysics, performanceWithPhysics, errors, consoleErrors, realModelCalls: 0, actualPmxLoaded: true }, null, 2));
+  await writeFile(join(folder, 'result.json'), JSON.stringify({ bones: 493, morphs: names.length, materialMorphs: 3, materialChange, symbolMorphPixels: symbolPixels, performanceWithoutPhysics, performanceWithPhysics, errors, consoleErrors, realModelCalls: 0, actualPmxLoaded: true }, null, 2));
   process.stdout.write(`Character acceptance passed. Private artifacts: ${folder}\n`);
 } finally {
   await writeFile(join(folder, 'host.log'), output);
