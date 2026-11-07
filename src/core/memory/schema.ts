@@ -28,9 +28,12 @@ export const intentSchema = z.object({
 }).strict();
 export type Intent = z.infer<typeof intentSchema>;
 export const jobSchema = z.object({ id: z.string().min(1), refs: z.array(z.string()).max(64), kind: z.enum(['incremental', 'reflection', 'dialogue']),
+  workerSessionId: z.string().optional(),
   input: z.string().max(6000), at: z.number().int().nonnegative(), requestId: z.string().optional(), intentIds: z.array(z.string()).max(32).optional() }).strict();
 export type MemoryJob = z.infer<typeof jobSchema>;
 export const recordSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('worker-created'), sessionId: z.string().regex(/^liveseed-memory-[0-9a-f-]{36}$/), title: z.string().min(1).max(80), at: z.number().int().nonnegative() }).strict(),
+  z.object({ type: z.literal('worker-selected'), sessionId: z.string(), previousSessionId: z.string(), at: z.number().int().nonnegative() }).strict(),
   z.object({ type: z.literal('soul'), text: z.string().max(1000000), at: z.number().int().nonnegative(), source: z.literal('stateDir/soul.md') }).strict(),
   z.object({ type: z.literal('evidence'), items: z.array(evidenceSchema).max(128) }).strict(),
   z.object({ type: z.literal('intent'), intent: intentSchema }).strict(),
@@ -42,6 +45,7 @@ export const recordSchema = z.discriminatedUnion('type', [
 export type MemoryRecord = z.infer<typeof recordSchema>;
 export interface MemoryItem { id: string; text: string; evidence: string[]; state: 'active' | 'quiet' | 'archived' | 'denied'; protected: boolean; version: number }
 export interface MemoryState {
+  workerSessions: { id: string; title: string; at: number }[]; activeWorkerSessionId: string;
   version: number; contextRevision: number; evidence: Map<string, Evidence>; items: Map<string, MemoryItem>; intents: Map<string, Intent>; handledIntents: Set<string>;
   jobs: Map<string, MemoryJob>; accepted: Set<string>; cancelled: Set<string>; processed: Set<string>;
   narrative: z.infer<typeof passageSchema>; chapter: z.infer<typeof passageSchema>;

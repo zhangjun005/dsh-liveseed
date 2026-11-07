@@ -1,0 +1,68 @@
+{
+  "date": "2026-11-07",
+  "dsh": "0.2.0-rc.2",
+  "realModelCalls": 0,
+  "commands": {
+    "pnpm check": "passed: typecheck, build, loader smoke and 8 integration tests",
+    "pnpm test:browser": "passed with isolated DSH_HOME and synthetic yesterday/today native sessions",
+    "npm pack --dry-run": "passed; includes native composer MIT license"
+  },
+  "artifacts": {
+    "integration": ".local/integration-QLyvZj",
+    "memory": ".local/memory-aQ1aa4",
+    "browser": ".local/web-acceptance-agKFDx"
+  },
+  "covered": [
+    "private date-segment catalog and independent memory Sessions with one automatic-task target",
+    "historical read-only views without resuming old Agents",
+    "old-segment accepted-send retry acknowledgement without new writes",
+    "strict Typert descriptors and native Gateway WebSocket follow",
+    "baseline and live updates keyed by generation, native Session ID and revision",
+    "cancelled stream releases subscriptions",
+    "existing page reconnects after isolated host restart without reload",
+    "drafts survive reconnect and remain separate between chat and memory",
+    "mobile navigation, send, stop and maintenance conversation restore",
+    "no legacy HTTP-polling requests from frontend",
+    "no permission control in companion input",
+    "ordinary and audit Session access rejected through the companion namespace",
+    "native ordinary session list and search exclude private sessions",
+    "top-right circular floating session menu; Escape and outside-pointer dismissal",
+    "real native InputBar, SessionInputShell and Lexical editor; no textarea",
+    "native Enter send, Shift+Enter newline, undo and failed-send draft restoration",
+    "separate chat and memory circular buttons vertically stacked; native corner-shape override",
+    "native DSH font settings changed from 14 to 18px; user message, assistant Markdown and native editor follow",
+    "memory worker create/assign Remote APIs with durable registry and pointer",
+    "worker create UUID retry idempotency, busy/stale/ordinary/audit assignment rejection",
+    "selected worker survives host restart; old maintenance dialogue and accepted receipts preserved",
+    "three circular buttons: chat picker / memory Session picker / native settings modal",
+    "worker candidate choice requires explicit Assign; new-and-assign lives in settings",
+    "worker assignment in settings preserves the current chat view",
+    "native 800px settings modal with category navigation and responsive mobile layout",
+    "independent memory Session navigation and task assignment; creating a Session does not assign it",
+    "unassigned memory Sessions accept dialogue and retain separate drafts and history",
+    "native persistence verifies dialogue executes in its chosen Session and automatic tasks in the assigned Session",
+    "successful composer retry clears stale notices before Session remount",
+    "read-only selectable soul.md and narrative.md absolute paths use the actual host stateDir; no path configuration"
+  ],
+  "reusedUi": [
+    "public DSH Button",
+    "public DSH MarkdownText",
+    "DSH theme tokens",
+    "native InputBar",
+    "native SessionInputShell / Lexical / submit machine",
+    "public DSH Modal (focus, Escape, mask, portal)"
+  ],
+  "unchangedBoundaries": [
+    "no general host tools",
+    "no automatic soul rewrite",
+    "no real-provider API tests",
+    "no existing-profile or global DSH modification"
+  ],
+  "compatibilityBoundary": {
+    "version": "0.2.0-rc.2",
+    "upstreamBundleSha256": "8d5c8223197d52d69eb0587f88a8a051fc172985553915f1de361544653a68b0",
+    "adapter": "Build-time exports from the pinned published client bundle; not a stable upstream standalone Composer API. Changed bundle fails closed. No ordinary SessionController binding or global installation changes.",
+    "license": "dist/NATIVE-COMPOSER-LICENSE.txt (DeepSeek MIT)"
+  },
+  "workerSelectionContract": "docs/14-整理Session指定与界面设置.md"
+}

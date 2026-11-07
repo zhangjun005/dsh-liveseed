@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
 import Sessions, { SessionId } from '@deepseek-ai/dsh-session';
 import Projections from '@deepseek-ai/dsh-session-projection';
@@ -13,7 +13,7 @@ import * as Checkpoints from '@deepseek-ai/dsh-session-checkpoint-policy';
 import TokenMeter from '@deepseek-ai/dsh-token-meter';
 import Compaction from '@deepseek-ai/dsh-compaction-basic';
 import type {} from '@deepseek-ai/dsh-agent-default-model';
-import { CompanionError, type CompanionState, type SendRequest } from '../../core/protocol.js';
+import { CompanionError, type CompanionCatalog, type CompanionState, type SendRequest, type SessionView, type ViewRequest } from '../../core/protocol.js';
 import { HostModelBridge } from './model-bridge.js';
 import { registerTranscript, transcriptOf, transcriptFromEvents, messageDigest, type Transcript } from './transcript.js';
 import { MemoryRuntime, MAIN_TOOLS, readEvents, productDay, type MemoryConfig } from './memory.js';
@@ -40,6 +40,13 @@ export class CompanionRuntime {
   private memory: MemoryRuntime | undefined;
   private history: Transcript = transcriptFromEvents([]);
   private currentDay = '';
+  private readonly listeners = new Set<() => void>();
+  private readonly oldViews = new Map<string, SessionView>();
+  private sequence = 0;
+  get revision(): number { return this.sequence; }
+  get closed(): boolean { return this.closing; }
+  subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
+  private changed(): void { this.sequence++; for (const listener of this.listeners) listener(); }
   readonly ready: Promise<void>;
 
   constructor(private readonly host: Context, private readonly config: RuntimeConfig) {
@@ -69,6 +76,8 @@ export class CompanionRuntime {
     await ctx.plugin({ inject: ['sessionProjections'], apply: registerTranscript });
     this.memory = new MemoryRuntime(this.host, this.config);
     await this.memory.ready;
+    this.memory.subscribe(() => this.changed());
+    ctx.on('session/event', () => this.changed());
     const bridge = new HostModelBridge(this.host.llm, () => this.activeSelection, this.config.maxTokens, MAIN_TOOLS);
     const syncRoutes = (): void => {
       if (this.closing) return;
@@ -82,6 +91,7 @@ export class CompanionRuntime {
       if (frame.type === 'start') this.liveText = '';
       else if (frame.type === 'chunk' && frame.chunk.type === 'text-delta') this.liveText += frame.chunk.text;
       else if (frame.type === 'end') this.liveText = '';
+      this.changed();
     });
     const segments = this.memory.snapshot().segments;
     const active = segments.at(-1);
@@ -124,6 +134,7 @@ export class CompanionRuntime {
     } catch (error) { await next.dispose(); throw error; }
     this.addHistory(transcriptOf(this.inner, old.agent.session));
     this.handle = next; this.currentDay = day;
+    this.changed();
     await old.dispose();
   }
   async state(): Promise<CompanionState> {
@@ -161,7 +172,7 @@ export class CompanionRuntime {
         await this.memory!.ingest(String(agent.session.id), await readEvents(this.inner, agent.session));
       })
         .catch(() => { this.persistenceFailed = true; this.host.logger.warn('LiveSeed could not finish or persist the active turn.'); })
-        .finally(() => { clearTimeout(timeout); this.turnTask = undefined; });
+        .finally(() => { clearTimeout(timeout); this.turnTask = undefined; this.changed(); });
       try { await this.inner.sessions.flush(agent.session); }
       catch { this.persistenceFailed = true; agent.cancel({ kind: 'hook', reason: 'LiveSeed persistence failure' }); throw new CompanionError(503, '消息暂未保存，请稍后重试。'); }
       return { messageId: message.id };
@@ -175,12 +186,64 @@ export class CompanionRuntime {
     await this.turnTask;
   }
   async memoryState(): Promise<CompanionState> { await this.ready; return this.memory!.panel(); }
-  async sendMemory(request: SendRequest): Promise<{ messageId: string }> { await this.ready; return this.memory!.send(request); }
-  async stopMemory(): Promise<void> { await this.ready; await this.memory!.stop(); }
+  async catalog(): Promise<CompanionCatalog> {
+    await this.ready;
+    if (this.closing || !this.handle) throw new CompanionError(503, '德谬歌正在重新连接。');
+    const active = String(this.handle.agent.session.id);
+    return { generation: this.generation, activeSessionId: active, memorySessionId: this.memory!.sessionId, memorySessions: this.memory!.workerSessions(),
+      filePaths: { soul: resolve(this.config.stateDir, 'soul.md'), narrative: resolve(this.config.stateDir, 'narrative.md') }, sessions: [
+      ...this.memory!.segments().map(segment => ({ id: segment.sessionId, kind: 'chat' as const, day: segment.day, title: segment.day,
+        active: segment.sessionId === active, running: segment.sessionId === active && (this.handle!.agent.status === 'running' || Boolean(this.turnTask)) })),
+      ...this.memory!.workerSessions().map(worker => ({ ...worker, kind: 'memory' as const, day: null })),
+    ] };
+  }
+  async sessionView(sessionId: string, limit = 200): Promise<SessionView> {
+    const catalog = await this.catalog();
+    if (sessionId === 'current') sessionId = catalog.activeSessionId;
+    if (sessionId === 'memory') sessionId = catalog.memorySessionId;
+    const entry = catalog.sessions.find(item => item.id === sessionId);
+    if (!entry) throw new CompanionError(404, '这份会话不属于德谬歌。');
+    if (entry.kind === 'memory') return { ...await this.memory!.panel(limit, sessionId), sessionId, readOnly: false };
+    if (entry.active && limit <= 200) return { ...await this.state(), messages: transcriptOf(this.inner, this.handle!.agent.session).messages, sessionId, readOnly: false };
+    const key = `${sessionId}:${limit}`;
+    if (!entry.active && this.oldViews.has(key)) return this.oldViews.get(key)!;
+    if (entry.active) await this.inner.sessions.flush(this.handle!.agent.session);
+    const source = await this.inner.sessionPersistence.open(SessionId(sessionId), 'read');
+    let transcript: Transcript;
+    try { transcript = transcriptFromEvents((await source.read()).events, limit); } finally { await source.close(); }
+    const view = { generation: this.generation, revision: transcript.revision, running: entry.active && (this.handle!.agent.status === 'running' || Boolean(this.turnTask)), configured: Boolean(this.selected()), messages: transcript.messages,
+      liveText: entry.active ? this.liveText : '', notice: transcript.notice, sessionId, readOnly: !entry.active };
+    if (!entry.active) this.oldViews.set(key, view);
+    return view;
+  }
+  inspectView(request: ViewRequest): Promise<{ catalog: CompanionCatalog; view: SessionView }> {
+    const operation = this.pendingMutation.then(async () => {
+      const catalog = await this.catalog();
+      const sessionId = request.sessionId === 'current' ? catalog.activeSessionId : request.sessionId === 'memory' ? catalog.memorySessionId : request.sessionId;
+      return { catalog, view: await this.sessionView(sessionId, request.limit) };
+    });
+    this.pendingMutation = operation.catch(() => {});
+    return operation;
+  }
+  async sendMemory(request: SendRequest, expectedSessionId?: string): Promise<{ messageId: string }> { await this.ready; return this.memory!.send(request, expectedSessionId); }
+  async createMemorySession(request: { requestId: string; title: string }) { await this.ready; return this.memory!.createWorker(request); }
+  selectMemorySession(request: { sessionId: string; expectedSessionId: string }): Promise<{ sessionId: string }> {
+    const operation = this.pendingMutation.then(async () => { await this.ready; return this.memory!.selectWorker(request); });
+    this.pendingMutation = operation.catch(() => {}); return operation;
+  }
+  async receipt(request: SendRequest): Promise<{ messageId: string } | undefined> {
+    await this.ready;
+    const prior = transcriptOf(this.inner, this.handle!.agent.session).requests[request.requestId] ?? this.history.requests[request.requestId];
+    if (!prior) return undefined;
+    if (prior.digest !== messageDigest(request.text)) throw new CompanionError(409, '这条发送记录与消息内容不一致。');
+    return { messageId: prior.messageId };
+  }
+  async stopMemory(expectedSessionId?: string): Promise<void> { await this.ready; await this.memory!.stop(expectedSessionId); }
   async organizeMemory(): Promise<void> { await this.ready; await this.turnTask; await this.memory!.drain(); }
   close(): Promise<void> {
     return this.closeTask ??= (async () => {
       this.closing = true;
+      this.changed();
       await this.ready.catch(() => {});
       await this.releaseAdapters?.();
       await this.pendingMutation.catch(() => {});

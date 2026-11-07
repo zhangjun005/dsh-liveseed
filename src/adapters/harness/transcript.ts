@@ -25,7 +25,7 @@ const textOf = (content: UserMessage['content']): string => content.filter(block
 export const messageDigest = (text: string): string => createHash('sha256').update(text).digest('hex');
 
 /** Rebuildable UI state only. All authoritative entries remain native Session events. */
-function fold(state: Transcript, event: SessionEvent): Transcript {
+function fold(state: Transcript, event: SessionEvent, limit = 200): Transcript {
   if (event.type === 'agent/inbox/spliced') {
     // Receipts must survive retries even before a queued message becomes user/message.
     const requests = { ...state.requests };
@@ -43,18 +43,18 @@ function fold(state: Transcript, event: SessionEvent): Transcript {
   }
   if (event.type === 'user/message' && event.data.source.kind === 'liveseed-user') {
     const message = { id: event.data.id, role: 'user' as const, text: textOf(event.data.content), at: event.time };
-    return { ...state, messages: [...state.messages, message].slice(-200), requests: { ...state.requests, [event.data.source.requestId]: { messageId: message.id, digest: messageDigest(message.text) } }, revision: event.seq, notice: null };
+    return { ...state, messages: [...state.messages, message].slice(-limit), requests: { ...state.requests, [event.data.source.requestId]: { messageId: message.id, digest: messageDigest(message.text) } }, revision: event.seq, notice: null };
   }
   if (event.type === 'assistant/message') {
     const message = event.data.message;
     const text = message.content.filter(block => block.type === 'text').map(block => block.text).join('\n');
     if (!text) return state;
-    return { ...state, messages: [...state.messages, { id: message.id, role: 'assistant' as const, text, at: event.time }].slice(-200), revision: event.seq };
+    return { ...state, messages: [...state.messages, { id: message.id, role: 'assistant' as const, text, at: event.time }].slice(-limit), revision: event.seq };
   }
   if (event.type === 'assistant/attempt') {
     const text = joinAssistantStreamText(event.data.stream);
     if (!text) return state;
-    return { ...state, messages: [...state.messages, { id: `attempt-${event.seq}`, role: 'assistant' as const, text, at: event.time }].slice(-200), revision: event.seq };
+    return { ...state, messages: [...state.messages, { id: `attempt-${event.seq}`, role: 'assistant' as const, text, at: event.time }].slice(-limit), revision: event.seq };
   }
   if (event.type === 'turn/end') {
     const notice = event.data.reason.kind === 'error' ? '这次没能完成回复，请稍后再试。'
@@ -74,6 +74,6 @@ export function transcriptOf(ctx: Context, session: Session): Transcript {
   if (!state) throw new Error('LiveSeed transcript projection is unavailable.');
   return state;
 }
-export function transcriptFromEvents(events: readonly SessionEvent[]): Transcript {
-  return events.reduce(fold, { messages: [], requests: {}, revision: -1, notice: null } as Transcript);
+export function transcriptFromEvents(events: readonly SessionEvent[], limit = 200): Transcript {
+  return events.reduce((state, event) => fold(state, event, limit), { messages: [], requests: {}, revision: -1, notice: null } as Transcript);
 }

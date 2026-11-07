@@ -6,13 +6,13 @@
 
 主线仅开放主动只读回想、重要 / 临时保护意图与简短理解提交；整理线维护已授权记忆域。文件、Shell 和普通工作区控制能力均未开放。早期对话原型记录见 [最小原型与验收](docs/04-最小原型与验收.md)。
 
-当前记忆实现、依赖的设计 Markdown、调度默认值与验收范围统一记录在 [记忆模块目录说明](src/core/memory/README.md)。原始设计见 [记忆模块](docs/05-记忆模块讨论稿.md)。[网页角色展示与驱动](docs/06-网页角色展示与驱动方案.md) 继续搁置。
+当前记忆实现、依赖的设计 Markdown、调度默认值与验收范围统一记录在 [记忆模块目录说明](src/core/memory/README.md)。原始设计见 [记忆模块](docs/05-记忆模块讨论稿.md)。[网页角色展示与驱动](docs/06-网页角色展示与驱动方案.md) 已恢复讨论，完整 PMX 骨架与表情适配见 [方案 18](docs/18-完整PMX骨架与表情适配方案.md)，尚未实现渲染。
 
-记忆的运行时机、取舍与 context 压缩联动见 [补充方案](docs/07-记忆取舍与上下文压缩.md)。视觉角色模块当前搁置，仅保留接口边界。
+记忆的运行时机、取舍与 context 压缩联动见 [补充方案](docs/07-记忆取舍与上下文压缩.md)。视觉角色计划在 DSH 网页根级浮层常驻，执行器待实际素材验证后确定。
 
 主线按天安全换段、有限交接和跨段回执恢复已实现，见 [分段方案](docs/08-长期身份与Session分段.md)。整理模型始终使用同一个长期私有 Session。已确认内容与保留项见 [决策清单](docs/09-决策状态与未决项.md)。
 
-状态依赖 Context，用户可通过输入框下方“整理记忆”与整理线对话，模型复用宿主路由。工作 prompt 后 15 秒主动表达尚未接入，见 [接入与行为方案](docs/10-Context状态与工作输入触发.md)。
+状态依赖 Context。面板右上角聊天按钮展开每日主线，记忆整理按钮可选择或新建独立维护会话，原生 Modal 设置弹窗负责指定自动整理任务的投递 Session；历史主线只读，当前主线跨日自动续接。输入框复用原生 InputBar / Lexical，移除权限选项；通信使用原生 Gateway / WebSocket，见 [导航与通信](docs/13-专属会话导航与原生通信.md)。字号跟随 DSH 原生设置；整理 Session 可新建并手工指定，见 [指定接口](docs/14-整理Session指定与界面设置.md)。工作 prompt 后 15 秒主动表达尚未接入。
 
 soul、真实叙事与消息的续接式组织，以及可选动作协议的参考，见 [Context 与表现协议讨论](docs/11-叙事续接式Context与表现协议.md)。
 
@@ -66,8 +66,9 @@ dsh --profile liveseed-dev --from-default-profile web --patch E:/works/LiveSeed/
 ```text
 src/core/protocol.ts          与宿主无关的面板协议
 src/core/memory/              记忆 schema、提交折叠、召回与设计依赖清单
-src/adapters/harness/         原生运行服务、模型桥、HTTP 与日志投影
-src/client/index.tsx          专属面板
+src/adapters/harness/         原生运行服务、模型桥、Remote 与日志投影
+src/client/panel.tsx          右上角会话菜单与消息视图
+src/client/composer.tsx       原生输入框与专属 Remote 提交适配
 scripts/build-client.mjs      DSH 客户端模块打包
 scripts/testing/              合成模型、集成测试与隔离 Web 验收
 scripts/probes/               前期接口实验，不是产品启动器

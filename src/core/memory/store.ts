@@ -2,6 +2,7 @@ import { recordSchema, type Evidence, type Intent, type MemoryItem, type MemoryR
 
 export function emptyMemory(): MemoryState {
   return { version: 0, contextRevision: 0, evidence: new Map(), items: new Map(), intents: new Map(), handledIntents: new Set(), jobs: new Map(), accepted: new Set(), cancelled: new Set(), processed: new Set(),
+    workerSessions: [{ id: 'liveseed-memory', title: '记忆整理', at: 0 }], activeWorkerSessionId: 'liveseed-memory',
     narrative: { text: '', evidence: [] }, chapter: { text: '', evidence: [] }, segments: [], replies: new Map(), soulCandidates: [], soulVersions: [] };
 }
 const validRefs = (state: MemoryState, refs: string[]): void => {
@@ -28,6 +29,18 @@ export function foldMemory(previous: MemoryState, raw: MemoryRecord): MemoryStat
   const record = recordSchema.parse(raw);
   const state = structuredClone(previous);
   switch (record.type) {
+    case 'worker-created': {
+      const existing = state.workerSessions.find(worker => worker.id === record.sessionId);
+      if (existing) { if (existing.title !== record.title) throw new Error('Worker identity conflict.'); return previous; }
+      state.workerSessions.push({ id: record.sessionId, title: record.title, at: record.at });
+      break;
+    }
+    case 'worker-selected':
+      if (!state.workerSessions.some(worker => worker.id === record.sessionId)) throw new Error('Unknown worker session.');
+      if (state.activeWorkerSessionId === record.sessionId) return previous;
+      if (state.activeWorkerSessionId !== record.previousSessionId) throw new Error('Worker selection conflict.');
+      state.activeWorkerSessionId = record.sessionId;
+      break;
     case 'soul':
       state.soulVersions.push({ text: record.text, at: record.at, source: record.source });
       break;
@@ -44,6 +57,7 @@ export function foldMemory(previous: MemoryState, raw: MemoryRecord): MemoryStat
       if (!state.intents.has(record.intent.id)) state.intents.set(record.intent.id, record.intent);
       break;
     case 'job':
+      if (record.job.workerSessionId && !state.workerSessions.some(worker => worker.id === record.job.workerSessionId)) throw new Error('Unknown worker session.');
       validRefs(state, record.job.refs);
       if (!state.jobs.has(record.job.id)) state.jobs.set(record.job.id, record.job);
       break;

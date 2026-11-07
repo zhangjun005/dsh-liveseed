@@ -37,7 +37,7 @@ export interface MemoryConfig {
 }
 export const MAIN_TOOLS = new Set(['memory_recall', 'memory_intent', 'memory_reflect']);
 const WORKER_TOOLS = new Set(['memory_lookup']);
-const WORKER = SessionId('liveseed-memory');
+const DEFAULT_WORKER = 'liveseed-memory';
 const WORKER_PROMPT = `你是德谬歌的独立记忆整理线，与主线隔离。处理真实来源的经历、原生 reasoning 与显式内省，区分事实、理解和事后推测。
 你可以维护已授权记忆域、独立决定保留/合并/更正/降权/归档，更新 narrative；不要假造经历，不把重注入、摘要或管理记录当新经历。保护和明确用户要求不能静默绕过。不调用外部工具，不自动改写 soul。
 incremental 以核对近期事实、偏好和未完事项为主；reflection 回看长期理解、关系与保留/放下；dialogue 处理用户维护请求。没有新依据可以保持原状，不要求每个任务都改叙事。
@@ -92,6 +92,8 @@ export class MemoryRuntime {
   private closing = false;
   private failed = false;
   private lastError: string | null = null;
+  private lastErrorSessionId = DEFAULT_WORKER;
+  private executingSessionId = DEFAULT_WORKER;
   private cancelTimer: (() => void) | undefined;
   private registration: AdapterRegistrationHandle | undefined;
   private releaseAdapters: (() => unknown) | undefined;
@@ -106,7 +108,17 @@ export class MemoryRuntime {
   private soul = '';
   private closeTask: Promise<void> | undefined;
   private delivery: Promise<unknown> = Promise.resolve();
+  private switching = false;
+  private setupWorker: ((ctx: Context) => void) | undefined;
   readonly ready: Promise<void>;
+  private readonly listeners = new Set<() => void>();
+  subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
+  private changed(): void { for (const listener of this.listeners) listener(); }
+  private notice(text: string | null): void { this.lastError = text; this.lastErrorSessionId = this.executingSessionId; this.changed(); }
+  segments() { return this.state.segments.map(({ sessionId, day }) => ({ sessionId, day })); }
+  get running(): boolean { return Boolean(this.driving); }
+  get sessionId(): string { return this.state.activeWorkerSessionId; }
+  workerSessions() { return this.state.workerSessions.map(worker => ({ id: worker.id, title: worker.title, active: worker.id === this.sessionId, running: this.activeJob !== undefined && (this.activeJob.workerSessionId ?? DEFAULT_WORKER) === worker.id })); }
   constructor(private readonly host: Context, private readonly config: MemoryConfig) { this.ready = this.start(); }
   private selected(): ModelSelection | undefined {
     if (this.config.memoryProvider && this.config.memoryModel) return { provider: this.config.memoryProvider, model: this.config.memoryModel };
@@ -133,10 +145,11 @@ export class MemoryRuntime {
     ctx.on('agent/assistant-stream', ({ frame }) => {
       if (frame.type === 'start') this.liveText = '';
       else if (frame.type === 'chunk' && frame.chunk.type === 'text-delta') this.liveText += frame.chunk.text;
+      this.changed();
     });
     const setup = (agentCtx: Context): void => {
       installModelSelection(agentCtx, this.modelSelection);
-      agentCtx.tools.guard(exec => WORKER_TOOLS.has(exec.name) && exec.agent?.session.id === WORKER ? undefined : 'Memory grants only scoped lookup.');
+      agentCtx.tools.guard(exec => WORKER_TOOLS.has(exec.name) && exec.agent?.session.id === this.handle?.agent.session.id ? undefined : 'Memory grants only scoped lookup.');
       bindOverflow(agentCtx, ctx);
       agentCtx.on('agent/pre-step', async ({ step, agent, signal }, next) => {
         if (step > 6 || !this.activeJob || this.closing) return { kind: 'reject' };
@@ -169,6 +182,7 @@ export class MemoryRuntime {
           return JSON.stringify({ memories: hits, raw });
         } }));
     };
+    this.setupWorker = setup;
     const journalId = SessionId('liveseed-memory-journal');
     this.journal = await ctx.sessionPersistence.stat(journalId)
       ? await ctx.sessionPersistence.open(journalId, 'write')
@@ -178,9 +192,10 @@ export class MemoryRuntime {
     for (const event of recorded.events) {
       if (event.type === 'user/message' && event.data.source.kind === 'liveseed-memory-record') this.state = foldMemory(this.state, recordSchema.parse(event.data.source.record));
     }
-    this.handle = await ctx.sessionPersistence.stat(WORKER)
-      ? await ctx.agents.resume({ resumeSessionId: WORKER, setup })
-      : await ctx.agents.create({ sessionId: WORKER, setup });
+    const workerId = SessionId(this.state.activeWorkerSessionId);
+    this.handle = await ctx.sessionPersistence.stat(workerId)
+      ? await ctx.agents.resume({ resumeSessionId: workerId, setup })
+      : await ctx.agents.create({ sessionId: workerId, setup });
     await this.handle.agent.whenIdle();
     this.handle.agent.inbox.clear();
     await ctx.sessions.flush(this.handle.agent.session);
@@ -193,6 +208,44 @@ export class MemoryRuntime {
     this.arm();
   }
   snapshot(): MemoryState { return structuredClone(this.state); }
+  async createWorker(request: { requestId: string; title: string }): Promise<{ sessionId: string }> {
+    await this.ready;
+    const sessionId = `liveseed-memory-${request.requestId.toLowerCase()}`;
+    const existing = this.state.workerSessions.find(worker => worker.id === sessionId);
+    if (existing && existing.title !== request.title) throw new CompanionError(409, '创建请求已用于另一个会话名称。');
+    await this.persist({ type: 'worker-created', sessionId, title: request.title, at: Date.now() });
+    return { sessionId };
+  }
+  selectWorker(request: { sessionId: string; expectedSessionId: string }): Promise<{ sessionId: string }> {
+    const operation = this.delivery.then(async () => {
+      await this.ready;
+      if (this.failed || this.closing) throw new CompanionError(503, '记忆整理暂时不可用。');
+      if (!this.state.workerSessions.some(worker => worker.id === request.sessionId)) throw new CompanionError(404, '请选择已登记的专属整理会话。');
+      if (this.sessionId === request.sessionId) return { sessionId: this.sessionId };
+      if (this.sessionId !== request.expectedSessionId) throw new CompanionError(409, '整理会话已变化，请刷新后再选择。');
+      if (this.driving) throw new CompanionError(409, '正在整理，请等本次任务完成或停止后再切换。');
+      this.switching = true;
+      try {
+        await this.persist({ type: 'worker-selected', sessionId: request.sessionId, previousSessionId: this.sessionId, at: Date.now() });
+        return { sessionId: this.sessionId };
+      } finally { this.switching = false; this.arm(); }
+    });
+    this.delivery = operation.catch(() => {}); return operation;
+  }
+  /** Run one Session at a time without changing which Session owns automatic tasks. */
+  private async useWorker(sessionId: string): Promise<void> {
+    if (String(this.handle?.agent.session.id) === sessionId) return;
+    const id = SessionId(sessionId);
+    let next: AgentHandle | undefined = await this.ctx.sessionPersistence.stat(id)
+      ? await this.ctx.agents.resume({ resumeSessionId: id, setup: this.setupWorker! })
+      : await this.ctx.agents.create({ sessionId: id, setup: this.setupWorker! });
+    try {
+      await next.agent.whenIdle(); next.agent.inbox.clear(); await this.ctx.sessions.flush(next.agent.session);
+      const previous = this.handle!;
+      this.handle = next; next = undefined; this.workerScrubbedRevision = -1;
+      await previous.dispose();
+    } finally { await next?.dispose(); }
+  }
   private persist(record: MemoryRecord): Promise<void> {
     const task = this.mutation.then(async () => {
       if (this.failed || this.closing || !this.handle) throw new Error('Memory persistence is unavailable.');
@@ -202,7 +255,7 @@ export class MemoryRuntime {
         data: createUserMessage({ content: [{ type: 'text', text: '（内部维护记录；不是新的角色经历。）' }], source: { kind: 'liveseed-memory-record', record } }) };
       try { await this.journal!.append([event]); await this.journal!.flush(); }
       catch (error) { this.failed = true; throw error; }
-      this.journalSeq++; this.state = next;
+      this.journalSeq++; this.state = next; this.changed();
     });
     this.mutation = task.catch(() => {}); return task;
   }
@@ -218,12 +271,15 @@ export class MemoryRuntime {
   }
   private arm(delay?: number): void {
     this.cancelTimer?.(); this.cancelTimer = undefined;
-    if (this.closing || this.failed) return;
-    this.cancelTimer = this.ctx.timeout(() => { this.cancelTimer = undefined; void this.drain().catch(() => { this.lastError = '记忆整理暂未完成，原始记录仍保留。'; }); }, delay ?? this.config.memoryIdleMs ?? 60000);
-    const pending = [...this.state.evidence.keys()].filter(ref => !this.state.processed.has(ref));
-    if (delay === undefined && (pending.length >= (this.config.memoryBatchSize ?? 8) || [...this.state.jobs.keys()].some(id => !this.state.accepted.has(id) && !this.state.cancelled.has(id)) || [...this.state.intents.keys()].some(id => !this.state.handledIntents.has(id)))) {
+    if (this.closing || this.failed || this.switching) return;
+    this.cancelTimer = this.ctx.timeout(() => { this.cancelTimer = undefined; void this.drain().catch(() => this.notice('记忆整理暂未完成，原始记录仍保留。')); }, delay ?? this.config.memoryIdleMs ?? 60000);
+    const queued = [...this.state.jobs.values()].filter(job => !this.state.accepted.has(job.id) && !this.state.cancelled.has(job.id));
+    const reserved = new Set(queued.flatMap(job => job.refs));
+    const reservedIntents = new Set(queued.flatMap(job => job.intentIds ?? []));
+    const pending = [...this.state.evidence.keys()].filter(ref => !this.state.processed.has(ref) && !reserved.has(ref));
+    if (delay === undefined && (pending.length >= (this.config.memoryBatchSize ?? 8) || queued.some(job => job.kind === 'dialogue' || (job.workerSessionId ?? DEFAULT_WORKER) === this.sessionId) || [...this.state.intents.keys()].some(id => !this.state.handledIntents.has(id) && !reservedIntents.has(id)))) {
       this.cancelTimer?.(); this.cancelTimer = undefined;
-      queueMicrotask(() => { void this.drain().catch(() => { this.lastError = '记忆整理暂未完成，原始记录仍保留。'; }); });
+      queueMicrotask(() => { void this.drain().catch(() => this.notice('记忆整理暂未完成，原始记录仍保留。')); });
     }
   }
   private workerContext(): string {
@@ -238,41 +294,49 @@ export class MemoryRuntime {
   async drain(): Promise<void> {
     await this.ready;
     if (this.driving) return this.driving;
-    if (this.closing || this.failed || !this.selected()) return;
+    if (this.closing || this.failed || this.switching || !this.selected()) return;
     this.cancelTimer?.(); this.cancelTimer = undefined;
     let success = false;
     this.driving = this.process().then(() => { success = true; }).finally(() => {
       this.driving = undefined;
       if (!this.closing) this.arm(success ? undefined : 60000);
+      this.changed();
     });
+    this.changed();
     return this.driving;
   }
   private async process(): Promise<void> {
-    let job = [...this.state.jobs.values()].filter(candidate => !this.state.accepted.has(candidate.id) && !this.state.cancelled.has(candidate.id)).sort((a, b) => Number(b.kind === 'dialogue') - Number(a.kind === 'dialogue'))[0];
+    let job = [...this.state.jobs.values()].filter(candidate => (candidate.kind === 'dialogue' || (candidate.workerSessionId ?? DEFAULT_WORKER) === this.sessionId) && !this.state.accepted.has(candidate.id) && !this.state.cancelled.has(candidate.id)).sort((a, b) => Number(b.kind === 'dialogue') - Number(a.kind === 'dialogue'))[0];
     if (!job) {
+      const queued = [...this.state.jobs.values()].filter(job => !this.state.accepted.has(job.id) && !this.state.cancelled.has(job.id));
+      const reserved = new Set(queued.flatMap(job => job.refs));
+      const reservedIntents = new Set(queued.flatMap(job => job.intentIds ?? []));
       const refs: string[] = []; let length = 0;
       const intentIds: string[] = [];
       for (const intent of this.state.intents.values()) {
-        if (this.state.handledIntents.has(intent.id) || intentIds.length >= 32) continue;
+        if (this.state.handledIntents.has(intent.id) || reservedIntents.has(intent.id) || intentIds.length >= 32) continue;
         const extra = intent.evidence.filter(ref => !refs.includes(ref));
         if (refs.length + extra.length > 48) continue;
         intentIds.push(intent.id);
         for (const ref of extra) { refs.push(ref); const item = this.state.evidence.get(ref)!; length += item.text.length + (item.reasoning?.length ?? 0); }
       }
       for (const item of this.state.evidence.values()) {
-        if (this.state.processed.has(item.ref) || refs.includes(item.ref)) continue;
+        if (this.state.processed.has(item.ref) || reserved.has(item.ref) || refs.includes(item.ref)) continue;
         const cost = item.text.length + (item.reasoning?.length ?? 0);
         if (refs.length && (refs.length >= 48 || length + cost > 24000)) break;
         refs.push(item.ref); length += cost;
       }
       if (!refs.length && !intentIds.length) return;
       const every = this.config.memoryReflectionEvery ?? 4;
-      job = { id: randomUUID(), refs, intentIds, kind: intentIds.length || this.state.version % every === every - 1 ? 'reflection' : 'incremental', input: '', at: Date.now() };
+      job = { id: randomUUID(), workerSessionId: this.sessionId, refs, intentIds, kind: intentIds.length || this.state.version % every === every - 1 ? 'reflection' : 'incremental', input: '', at: Date.now() };
       await this.persist({ type: 'job', job });
     }
+    this.executingSessionId = job.workerSessionId ?? DEFAULT_WORKER;
+    await this.useWorker(this.executingSessionId);
     const handle = this.handle!;
     this.selection = this.selected(); this.modelSelection.current = this.selection;
     this.activeJob = job; this.lookupRefs = new Set(job.refs); this.lookupCalls = 0; this.liveText = '';
+    this.changed();
     if (this.state.contextRevision > 0 && this.workerScrubbedRevision !== this.state.contextRevision) {
       const session = handle.agent.session;
       const events = await readEvents(this.ctx, session);
@@ -304,7 +368,7 @@ export class MemoryRuntime {
       for (const key of ['narrative', 'chapter'] as const) if (proposal[key]?.evidence.some(ref => !allowed.has(ref))) throw new Error('Passage references unseen evidence.');
       if (this.cancelling.has(job.id)) throw new Error('Memory job was cancelled.');
       await this.persist({ type: 'accepted', id: job.id, at: Date.now(), proposal });
-      await this.renderNarrative(); this.lastError = null;
+      await this.renderNarrative(); this.notice(null);
     } finally { cancel(); this.activeJob = undefined; this.liveText = ''; }
   }
   private async renderNarrative(): Promise<void> {
@@ -420,43 +484,48 @@ export class MemoryRuntime {
       parameters: { text: { type: 'string', required: true } }, output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: String(value) }] },
       execute: async (args, exec) => { const parsed = z.object({ text: z.string().min(1).max(1800) }).strict().parse(args); return intent('understanding', parsed.text, undefined, exec.callId); } }));
   }
-  send(request: SendRequest): Promise<{ messageId: string }> {
-    const task = this.delivery.then(() => this.enqueueDialogue(request));
+  send(request: SendRequest, expectedSessionId?: string): Promise<{ messageId: string }> {
+    const task = this.delivery.then(() => this.enqueueDialogue(request, expectedSessionId));
     this.delivery = task.catch(() => {}); return task;
   }
-  private async enqueueDialogue(request: SendRequest): Promise<{ messageId: string }> {
+  private async enqueueDialogue(request: SendRequest, expectedSessionId?: string): Promise<{ messageId: string }> {
     await this.ready;
     if (this.failed || this.closing) throw new CompanionError(503, '记忆整理暂时不可用。');
     const existing = [...this.state.jobs.values()].find(job => job.requestId === request.requestId);
     if (existing) {
-      if (existing.input !== request.text) throw new CompanionError(409, '发送记录与内容不一致。');
-      if (!this.state.accepted.has(existing.id) && !this.state.cancelled.has(existing.id)) void this.drain().catch(() => { this.lastError = '这次整理尚未完成，请稍后重试。'; });
+      if (existing.input !== request.text || expectedSessionId && (existing.workerSessionId ?? DEFAULT_WORKER) !== expectedSessionId) throw new CompanionError(409, '发送记录与内容或会话不一致。');
+      if (!this.state.accepted.has(existing.id) && !this.state.cancelled.has(existing.id)) void this.drain().catch(() => this.notice('这次整理尚未完成，请稍后重试。'));
       return { messageId: existing.id };
     }
+    const sessionId = expectedSessionId ?? this.sessionId;
+    if (!this.state.workerSessions.some(worker => worker.id === sessionId)) throw new CompanionError(404, '这份会话不属于记忆整理。');
     if (!this.selected()) throw new CompanionError(409, '请先配置整理模型。');
     const refs = [...this.state.evidence.keys()].slice(-32);
-    const job: MemoryJob = { id: randomUUID(), kind: 'dialogue', refs, input: request.text, requestId: request.requestId, at: Date.now() };
+    const job: MemoryJob = { id: randomUUID(), workerSessionId: sessionId, kind: 'dialogue', refs, input: request.text, requestId: request.requestId, at: Date.now() };
     await this.persist({ type: 'job', job });
-    void this.drain().catch(() => { this.lastError = '这次整理尚未完成，请稍后重试。'; });
+    void this.drain().catch(() => this.notice('这次整理尚未完成，请稍后重试。'));
     return { messageId: job.id };
   }
-  async panel(): Promise<CompanionState> {
+  async panel(limit = 200, sessionId = this.sessionId): Promise<CompanionState> {
     await this.ready;
-    const messages = [...this.state.jobs.values()].filter(job => job.kind === 'dialogue').flatMap(job => {
+    const messages = [...this.state.jobs.values()].filter(job => job.kind === 'dialogue' && (job.workerSessionId ?? DEFAULT_WORKER) === sessionId).flatMap(job => {
       const reply = job.requestId ? this.state.replies.get(job.requestId) : undefined;
       return [{ id: job.id, role: 'user' as const, text: job.input, at: job.at }, ...(reply ? [{ id: `${job.id}-reply`, role: 'assistant' as const, text: reply.reply, at: reply.at }] : [])];
     });
-    return { generation: 'memory', revision: this.state.version, configured: Boolean(this.selected()), running: Boolean(this.driving), messages: messages.slice(-200), liveText: '', notice: this.lastError };
+    return { generation: 'memory', revision: this.journalSeq, configured: Boolean(this.selected()), running: this.activeJob !== undefined && (this.activeJob.workerSessionId ?? DEFAULT_WORKER) === sessionId, messages: messages.slice(-limit), liveText: '', notice: sessionId === this.lastErrorSessionId ? this.lastError : null };
   }
-  async stop(): Promise<void> {
+  async stop(expectedSessionId?: string): Promise<void> {
+    await this.delivery;
     const active = this.activeJob;
+    if (!active) return;
+    if (expectedSessionId && expectedSessionId !== (active.workerSessionId ?? DEFAULT_WORKER)) throw new CompanionError(409, '这份会话没有正在运行的回复，未停止其他会话。');
     if (active) this.cancelling.add(active.id);
     this.handle?.agent.cancel({ kind: 'user' }); await this.driving?.catch(() => {});
-    if (active && !this.state.accepted.has(active.id)) { await this.persist({ type: 'cancelled', id: active.id, at: Date.now() }); this.lastError = '本次整理已停止。'; }
+    if (active && !this.state.accepted.has(active.id)) { await this.persist({ type: 'cancelled', id: active.id, at: Date.now() }); this.notice('本次整理已停止。'); }
   }
   close(): Promise<void> {
     return this.closeTask ??= (async () => { this.closing = true; this.cancelTimer?.(); await this.ready.catch(() => {}); this.cancelTimer?.();
       await this.releaseAdapters?.(); this.handle?.agent.cancel({ kind: 'disposed' }); await this.driving?.catch(() => {});
-      await this.mutation.catch(() => {}); await this.handle?.dispose(); await this.journal?.close(); await this.ctx.fiber.dispose(); })();
+      await this.delivery.catch(() => {}); await this.mutation.catch(() => {}); await this.handle?.dispose(); await this.journal?.close(); await this.ctx.fiber.dispose(); })();
   }
 }

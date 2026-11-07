@@ -10,3 +10,6 @@ dist/
 data/
 logs/
 coverage/
+
+# Local licensed character assets; never commit or redistribute.
+/CharacterModel/

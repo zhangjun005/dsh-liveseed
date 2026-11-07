@@ -5,10 +5,10 @@ import type {} from '@deepseek-ai/dsh-agent-default-model';
 import type {} from '@deepseek-ai/dsh-client-connection';
 import type {} from '@deepseek-ai/dsh-host-webserver';
 import { CompanionRuntime } from './runtime.js';
-import { registerHttp } from './http.js';
+import { registerRemote } from './remote.js';
 
 export const name = 'dsh-liveseed';
-export const inject = ['llm', 'webServer', 'connection', 'agentDefaultModel'];
+export const inject = ['llm', 'connection', 'agentDefaultModel', 'typert', 'typertGateway'];
 export const Config = z.object({
   stateDir: z.string().refine(isAbsolute, 'stateDir must be an absolute path'),
   provider: z.string().min(1).optional(), model: z.string().min(1).optional(),
@@ -26,6 +26,6 @@ export async function apply(ctx: Context, config: z.infer<typeof Config>): Promi
   const runtime = new CompanionRuntime(ctx, config);
   ctx.effect(() => () => runtime.close());
   await runtime.ready;
-  registerHttp(ctx, runtime);
+  registerRemote(ctx, runtime);
   ctx.logger.info('LiveSeed companion is ready in its private native runtime.');
 }
