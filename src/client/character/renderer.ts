@@ -7,6 +7,7 @@ import { initializePhysics } from './physics.js';
 import { FramePacer } from './timing.js';
 import { CharacterMMDHelper } from './helper.js';
 import type { CharacterController, CharacterDiagnostics, Gesture, StageDriver } from './controller.js';
+import { characterClips } from './clips.js';
 
 export class CharacterRenderer implements StageDriver {
   private readonly scene = new Scene();
@@ -196,6 +197,7 @@ export class CharacterRenderer implements StageDriver {
     } finally { this.busy = false; this.schedule(); }
   }
   gesture(name: Gesture): void { this.pose?.gesture(name); this.diagnosticsDirty = true; }
+  clip(name?: string): void { if (!name) { this.pose?.stopClip(); return; } const clip = characterClips[name]; if (clip) this.pose?.playClip(clip); }
   morph(name: string, weight: number): void { this.pose?.morph(name, weight); this.diagnosticsDirty = true; }
   clearMorphs(): void { this.pose?.clearMorphs(); this.diagnosticsDirty = true; }
   private releaseMesh(): void {

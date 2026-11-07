@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { CharacterAssets } from '../../dist/adapters/harness/character-assets.js';
 import { descriptors } from '../../dist/adapters/harness/remote-contract.js';
 import { NativePose } from '../../dist/client/character/pose.js';
+import { sampleClip, characterClips } from '../../dist/client/character/clips.js';
 import { AnimationMixer, Bone, BufferGeometry, MeshBasicMaterial, Skeleton, SkinnedMesh, Quaternion, Vector3 } from 'three';
 import { FramePacer } from '../../dist/client/character/timing.js';
 import { constrainHandle, stageSize, upperBodyFrame } from '../../dist/client/character/layout.js';
@@ -96,6 +97,49 @@ test('arm targets retain limb lengths and lift the hand using measured direction
   assert.ok(Math.abs(point('右手首').distanceTo(point('右ひじ'))-forearmLength)<1e-6);
   const raised = point('右手首').sub(point('右ひじ')).applyQuaternion(torso.getWorldQuaternion(new Quaternion()).invert());
   assert.ok(raised.y > 1, 'greeting raises the forearm rather than twisting about an arbitrary local X axis');
+});
+
+test('baked clip keeps its mask, samples continuously and clamps at its duration', () => {
+  const clip = characterClips['wave-small'];
+  assert.ok(clip, 'wave-small clip is baked into the client bundle');
+  assert.deepEqual([...clip.mask].sort(), ['右ひじ', '右手首', '右肩', '右腕'].sort());
+  assert.equal(clip.fps, 30);
+  assert.equal(clip.duration, 2.2);
+  assert.equal(clip.frames.length, Math.round(clip.duration * clip.fps) + 1);
+  for (const frame of clip.frames) {
+    for (const bone of Object.keys(frame.rotations)) assert.ok(clip.mask.includes(bone), 'frames only write masked bones');
+  }
+  const start = sampleClip(clip, 0);
+  assert.equal(start.size, 4);
+  let previous = start, max = 0;
+  for (let frame = 1; frame <= Math.round(clip.duration * clip.fps); frame++) {
+    const next = sampleClip(clip, frame / 30);
+    for (const [bone, value] of next) max = Math.max(max, previous.get(bone).angleTo(value));
+    previous = next;
+  }
+  assert.ok(max > .001, 'clip actually moves');
+  assert.ok(max < .2, 'adjacent 30 fps samples stay continuous, max step=' + max.toFixed(4));
+  assert.equal(sampleClip(clip, 99).size, 4, 'sampling past the end clamps to the last frame');
+});
+
+test('clip layer blends over the authored baseline and releases back without drift', () => {
+  const names = ['センター', '上半身', '上半身1', '上半身2', '首', '頭', '両目', '右肩', '右腕', '右ひじ', '右手首'];
+  const bones = names.map(name => { const bone = new Bone(); bone.name = name; return bone; });
+  const mesh = new SkinnedMesh(new BufferGeometry(), new MeshBasicMaterial());
+  bones.forEach(bone => mesh.add(bone)); mesh.bind(new Skeleton(bones));
+  const pose = new NativePose(mesh, 20); const mixer = new AnimationMixer(mesh); mixer.clipAction(pose.base).play();
+  const step = dt => { mixer.update(dt); pose.apply(dt); };
+  const arm = bones[names.indexOf('右腕')], elbow = bones[names.indexOf('右ひじ')];
+  step(1 / 60);
+  const baseArm = arm.quaternion.clone();
+  pose.playClip(characterClips['wave-small']);
+  for (let i = 0; i < 40; i++) step(1 / 60);
+  assert.ok(arm.quaternion.angleTo(baseArm) > .05, 'clip layer moves the arm');
+  assert.ok(elbow.quaternion.angleTo(new Quaternion()) > .01, 'clip layer also drives the elbow');
+  pose.stopClip();
+  for (let i = 0; i < 120; i++) step(1 / 60);
+  assert.ok(!pose.clipActive(), 'clip layer releases after fading out');
+  assert.ok(arm.quaternion.angleTo(baseArm) < 1e-4, 'release returns to the authored baseline');
 });
 
 test('native pose input returns to baseline without drift and leaves dependent bones to MMD', () => {

@@ -12,11 +12,12 @@ export interface CharacterDiagnostics {
 export interface CharacterView {
   catalog?: CharacterCatalog; settings: CharacterSettings; status: 'loading' | 'ready' | 'error' | 'unavailable';
   message: string; diagnostics?: CharacterDiagnostics; selectedMorph: string; morphWeight: number;
+  clipName: string;
   physicsState: 'off' | 'loading' | 'on' | 'error';
   generation: number;
 }
 export interface StageDriver {
-  gesture(name: Gesture): void; morph(name: string, weight: number): void; clearMorphs(): void;
+  gesture(name: Gesture): void; clip(name?: string): void; morph(name: string, weight: number): void; clearMorphs(): void;
 }
 const KEY = 'liveseed.character.stage.v1';
 const initial: CharacterSettings = { visible: true, scale: 1, x: 24, y: 24, modelId: '', physics: false };
@@ -37,7 +38,7 @@ export class CharacterController {
       if (key === 'visible' || key === 'physics') return typeof value === 'boolean';
       if (key === 'modelId') return typeof value === 'string';
       return ['scale', 'x', 'y'].includes(key) && typeof value === 'number' && Number.isFinite(value);
-    })) }, status: 'loading', message: '', selectedMorph: '', morphWeight: 0, physicsState: 'off', generation: 0 };
+    })) }, status: 'loading', message: '', selectedMorph: '', morphWeight: 0, clipName: '', physicsState: 'off', generation: 0 };
     this.setSettings({ scale: this.view.settings.scale });
   }
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
@@ -78,6 +79,7 @@ export class CharacterController {
   }
   attach(driver: StageDriver): () => void { this.driver = driver; return () => { if (this.driver === driver) this.driver = undefined; }; }
   gesture(name: Gesture): void { this.driver?.gesture(name); }
+  clip(name?: string): void { this.driver?.clip(name); this.publish({ clipName: name ?? '' }); }
   morph(name: string, weight = this.view.morphWeight): void {
     this.driver?.morph(this.view.selectedMorph, 0);
     this.driver?.morph(name, weight);

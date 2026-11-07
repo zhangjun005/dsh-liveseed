@@ -1,6 +1,7 @@
 import { AnimationClip, Bone, QuaternionKeyframeTrack, VectorKeyframeTrack, Vector3, Quaternion } from 'three';
 import type { MMDMesh } from '@takahirox/three-mmd';
 import type { Gesture } from './controller.js';
+import { sampleClip, type CharacterClip } from './clips.js';
 
 /** Small native-PMX calibration driver. Derived bones, D chains and physics bones remain owned by MMD. */
 export class NativePose {
@@ -92,11 +93,37 @@ export class NativePose {
     if (weight <= 0) this.overrides.delete(index); else this.overrides.set(index, Math.min(1, weight));
   }
   clearMorphs(): void { this.overrides.clear(); }
+  private clipLayer: { clip: CharacterClip; time: number; weight: number; releasing: boolean } | undefined;
+  /** Play a baked clip over the authored baseline. The clip never replaces the baseline outright. */
+  playClip(clip: CharacterClip): void { this.clipLayer = { clip, time: 0, weight: 0, releasing: false }; }
+  stopClip(): void { if (this.clipLayer) this.clipLayer.releasing = true; }
+  clipActive(): boolean { return this.clipLayer !== undefined; }
   apply(dt: number): void {
-    // PropertyMixer may skip unchanged constant tracks. Restore this driver's authored baseline explicitly;
-    // neither previous procedural offsets nor previous IK/grant/physics output may become the next input.
-    // Future VMD playback must supply its sampled authored pose here instead of this neutral baseline.
+    this.restore();
+    this.authored(dt);
+    this.applyClip(dt);
+  }
+  /** Restore this driver's authored baseline explicitly. Neither previous procedural offsets nor previous
+   * IK / grant / physics output may become the next input, and PropertyMixer may skip constant tracks. */
+  private restore(): void {
     this.mesh.skeleton.bones.forEach((bone, i) => { bone.quaternion.copy(this.neutral[i]!.rotation); bone.position.copy(this.neutral[i]!.position); });
+  }
+  private applyClip(dt: number): void {
+    const layer = this.clipLayer;
+    if (!layer) return;
+    layer.time += dt;
+    const fade = .25;
+    if (!layer.releasing && layer.time > layer.clip.duration - fade) layer.releasing = true;
+    layer.weight = layer.releasing ? Math.max(0, layer.weight - dt / fade) : Math.min(1, layer.weight + dt / fade);
+    if (layer.weight <= 0) { this.clipLayer = undefined; return; }
+    for (const [name, target] of sampleClip(layer.clip, layer.time)) {
+      const index = this.indices.get(name);
+      if (index === undefined) continue;
+      this.mesh.skeleton.bones[index]!.quaternion.slerp(target, layer.weight);
+    }
+  }
+  /** Procedural baseline plus hand-authored gesture layers. */
+  private authored(dt: number): void {
     this.time += dt;
     this.turn('上半身2', .006 * Math.sin(this.time * 1.7));
     const eye = this.bone('両目');
