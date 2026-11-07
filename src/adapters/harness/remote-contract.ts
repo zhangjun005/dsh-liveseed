@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { InvocationDescriptor, RemoteResult, RemoteStreamHandle, TypertRemoteNamespace } from '@deepseek-ai/dsh-typert-protocol';
 import type { CompanionCatalog, FollowFrame, SessionView, ViewRequest } from '../../core/protocol.js';
+import type { CharacterCatalog } from '../../core/character.js';
 
 export const viewRequest = z.object({ sessionId: z.string().min(1).max(160), limit: z.number().int().min(1).max(2000).optional() }).strict();
 export const sendRequest = z.object({ sessionId: z.string().min(1).max(160), requestId: z.string().uuid(), text: z.string().trim().min(1).max(6000) }).strict();
@@ -24,6 +25,7 @@ const descriptor = (method: string, schema?: z.ZodType, result: z.ZodType = z.un
   result: codec(`${method}.result`, result), ...(stream ? { mode: 'stream', cancellation: { parameter: 'signal' } } : {}),
 });
 export const descriptors: readonly InvocationDescriptor[] = [
+  descriptor('character', undefined, z.object({ models: z.array(z.object({ id: z.string(), title: z.string(), model: z.string(), resources: z.array(z.object({ name: z.string(), url: z.string() })) })) })),
   descriptor('catalog', undefined, catalogSchema), descriptor('snapshot', viewRequest, stateSchema),
   descriptor('send', sendRequest, z.object({ messageId: z.string(), sessionId: z.string() })),
   descriptor('stop', z.object({ sessionId: z.string() }).strict(), z.object({ stopped: z.boolean() })),
@@ -34,6 +36,7 @@ export const descriptors: readonly InvocationDescriptor[] = [
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap { 'liveseed/invalid': object; 'liveseed/not-found': object; 'liveseed/conflict': object; 'liveseed/unavailable': object }
   interface TypertRemoteMap {
+    'liveseed/character': () => Promise<RemoteResult<CharacterCatalog>>;
     'liveseed/catalog': () => Promise<RemoteResult<CompanionCatalog>>;
     'liveseed/createMemorySession': (request: z.infer<typeof createMemoryRequest>) => Promise<RemoteResult<{ sessionId: string }>>;
     'liveseed/selectMemorySession': (request: z.infer<typeof selectMemoryRequest>) => Promise<RemoteResult<{ sessionId: string }>>;

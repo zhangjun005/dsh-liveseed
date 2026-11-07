@@ -14,3 +14,4 @@
       name: 'file:///E:/works/LiveSeed/dist/index.js'
       config:
         stateDir: !!js process.env.LIVESEED_TEST_DATA
+        characterDir: !!js process.env.LIVESEED_TEST_CHARACTER_DIR

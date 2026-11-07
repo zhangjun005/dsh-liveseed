@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { CompanionError, type FollowFrame, type ViewRequest } from '../../core/protocol.js';
 import type { CompanionRuntime } from './runtime.js';
 import { createMemoryRequest, selectMemoryRequest, descriptors, sendRequest, viewRequest } from './remote-contract.js';
+import type { CharacterAssets } from './character-assets.js';
 
 function boundary(error: unknown): never {
   if (error instanceof CompanionError) {
@@ -16,7 +17,8 @@ function boundary(error: unknown): never {
 }
 /** Same Gateway, authentication, RPC envelopes and WebSocket mux as DSH's own domains. */
 export class LiveSeedRemote extends TypertRemoteService {
-  constructor(ctx: Context, private readonly runtime: CompanionRuntime) { super(ctx, 'liveseed'); }
+  constructor(ctx: Context, private readonly runtime: CompanionRuntime, private readonly characters?: CharacterAssets) { super(ctx, 'liveseed'); }
+  async character() { try { return this.characters ? await this.characters.catalog() : { models: [] }; } catch (error) { return boundary(error); } }
   async catalog() { try { return await this.runtime.catalog(); } catch (error) { return boundary(error); } }
   async createMemorySession(request: z.infer<typeof createMemoryRequest>) {
     try { return await this.runtime.createMemorySession(createMemoryRequest.parse(request)); } catch (error) { return boundary(error); }
@@ -85,7 +87,7 @@ export class LiveSeedRemote extends TypertRemoteService {
     finally { release(); signal.removeEventListener('abort', changed); }
   }
 }
-export function registerRemote(ctx: Context, runtime: CompanionRuntime): void {
-  new LiveSeedRemote(ctx, runtime);
+export function registerRemote(ctx: Context, runtime: CompanionRuntime, characters?: CharacterAssets): void {
+  new LiveSeedRemote(ctx, runtime, characters);
   ctx.typert.register({ package: 'dsh-liveseed', face: 'host', schemas: [], model: { services: [], events: [], objects: [] }, invocations: descriptors });
 }

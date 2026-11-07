@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import type { SubmitOutcome } from '@deepseek-ai/dsh-client-ui-conversation/client';
 import { NativeComposer } from './composer.js';
 import { SettingsDialog } from './settings-dialog.js';
+import { CharacterController } from './character/controller.js';
+import { CharacterSettings } from './character/settings.js';
+import { CharacterStage } from './character/stage.js';
 import type { Context } from '@deepseek-ai/cordis';
 import { Button, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives';
 import { RemoteStreamCarrierError, type RemoteStream } from '@deepseek-ai/dsh-api-gateway/client';
@@ -17,7 +20,7 @@ const markdownLabels = { code: { copyLabel: '复制', copiedLabel: '已复制' }
 export function SeedIcon({ size }: Pick<SidebarPanelIconOwnerProps, 'size'>) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21V12M12 15C5 15 3 10 4 5c6 0 9 3 8 10ZM12 11c0-5 3-8 8-8 1 5-2 9-8 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
-export function CompanionPanel({ ctx }: { ctx: Context }) {
+export function CompanionPanel({ ctx, character }: { ctx: Context; character?: CharacterController }) {
   const [catalog, setCatalog] = useState<CompanionCatalog>();
   const [selection, setSelection] = useState('current');
   const [view, setView] = useState<SessionView>();
@@ -183,7 +186,7 @@ export function CompanionPanel({ ctx }: { ctx: Context }) {
       </div>
       {settingsMessage && <p className="ls-settings-status" role="status">{settingsMessage}</p>}
       {error && <p className="ls-settings-status" role="alert">{error}</p>}
-    </> }]} />
+    </> }, ...(character ? [{ id: 'character', label: '角色', content: <CharacterSettings controller={character}/> }] : [])]} />
     <div className="ls-conversation">
       <div className="ls-story" role="log" aria-live="polite" aria-relevant="additions text">
         {view && !view.messages.length && !view.liveText && <p className="ls-empty">{memory ? '想怎样整理这些记忆？' : '想聊什么？'}</p>}
@@ -208,7 +211,11 @@ export function CompanionPanel({ ctx }: { ctx: Context }) {
 export async function apply(ctx: Context): Promise<void> {
   await ctx.remote.$mount({ package: 'dsh-liveseed', descriptors });
   ctx.inject(['remote.liveseed'], scoped => {
-    scoped.slots.inject('main', () => scoped.slots.register({ name: 'main', key: PANEL, inject: () => ({}) }, () => <CompanionPanel ctx={scoped} />));
+    const character = new CharacterController(scoped);
+    scoped.effect(() => () => character.close());
+    void character.load();
+    scoped.slots.inject('shell.overlay', () => scoped.slots.register({ name: 'shell.overlay', id: 'liveseed.character', order: 10 }, () => <CharacterStage controller={character}/>));
+    scoped.slots.inject('main', () => scoped.slots.register({ name: 'main', key: PANEL, inject: () => ({}) }, () => <CompanionPanel ctx={scoped} character={character} />));
     scoped.slots.inject('sidebar.panellist', () => scoped.slots.register({ name: 'sidebar.panellist', id: PANEL, order: 15, label: '德谬歌' }, SeedIcon));
   });
 }

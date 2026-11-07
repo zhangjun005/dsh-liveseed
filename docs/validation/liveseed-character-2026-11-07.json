@@ -1,0 +1,36 @@
+{
+  "date": "2026-11-07",
+  "checkpointCommit": "3324c4e",
+  "dsh": "0.2.0-rc.2",
+  "renderer": "@takahirox/three-mmd 0.1.4 / three 0.186.1 / WebGL2",
+  "realModelCalls": 0,
+  "actualLocalPmxLoaded": true,
+  "model": { "bones": 493, "morphs": 84, "materialMorphs": 3 },
+  "checks": {
+    "pnpm check": "typecheck, build, loader smoke and 13 integration tests passed",
+    "pnpm test:browser": "isolated synthetic conversation and memory UI passed with empty character directory",
+    "pnpm test:character": "actual PMX loading, 84 Morph previews, upper-body crop and top-handle drag, reload, Worker physics, upstream projection equivalence, visibility and workspace/session persistence passed",
+    "npm pack --dry-run --ignore-scripts": "character licenses included; licensed model and local research excluded"
+  },
+  "privateArtifacts": {
+    "integration": ".local/integration-anY5yM",
+    "memory": ".local/memory-NqI50K",
+    "browser": ".local/web-acceptance-LxJL4C",
+    "character": ".local/character-acceptance-CRM9Gq"
+  },
+  "displayFixes": { "scaleMin": 0.25, "scaleMax": 6, "topHandle": true, "offscreenBodyAllowed": true, "visibleRegionOnlyRendering": true },
+  "observedPerformance": {
+    "scope": "short isolated local Edge/ANGLE WebGL2 run on RTX 4060 Laptop; not a general hardware guarantee",
+    "beforeWithoutPhysics": { "fps": 28.8 },
+    "afterWithoutPhysics": { "fps": 59, "updateMs": 2.56, "renderMs": 1.5 },
+    "beforeSynchronousPhysics": { "fps": 35.3, "updateMs": 26.4 },
+    "afterWorkerPhysics": { "fps": 60.2, "updateMs": 5.27, "renderMs": 1.49 },
+    "nativeProjectionComparisons": { "checks": 3, "maxPositionError": 0, "maxAngleErrorRadians": 7.884953353001448e-8, "maxStateError": 0 }
+  },
+  "limits": [
+    "HAST learned controller and 53-bone retargeting bridge are not connected",
+    "semantic face recipes, audio lip sync and main-line presentation intents are not connected",
+    "short physics finite-value test does not establish all-day stability or a resource budget",
+    "screenshots remain in ignored local artifacts and are not distributed"
+  ]
+}

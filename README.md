@@ -6,9 +6,9 @@
 
 主线仅开放主动只读回想、重要 / 临时保护意图与简短理解提交；整理线维护已授权记忆域。文件、Shell 和普通工作区控制能力均未开放。早期对话原型记录见 [最小原型与验收](docs/04-最小原型与验收.md)。
 
-当前记忆实现、依赖的设计 Markdown、调度默认值与验收范围统一记录在 [记忆模块目录说明](src/core/memory/README.md)。原始设计见 [记忆模块](docs/05-记忆模块讨论稿.md)。[网页角色展示与驱动](docs/06-网页角色展示与驱动方案.md) 已恢复讨论，完整 PMX 骨架与表情适配见 [方案 18](docs/18-完整PMX骨架与表情适配方案.md)，尚未实现渲染。
+当前记忆实现、依赖的设计 Markdown、调度默认值与验收范围统一记录在 [记忆模块目录说明](src/core/memory/README.md)。原始设计见 [记忆模块](docs/05-记忆模块讨论稿.md)。PMX 常驻舞台首版已实现，入口见 [角色模块](src/client/character/README.md)，实际范围见 [实现与验收](docs/19-PMX常驻舞台首版与验收.md)。
 
-记忆的运行时机、取舍与 context 压缩联动见 [补充方案](docs/07-记忆取舍与上下文压缩.md)。视觉角色计划在 DSH 网页根级浮层常驻，执行器待实际素材验证后确定。
+记忆的运行时机、取舍与 context 压缩联动见 [补充方案](docs/07-记忆取舍与上下文压缩.md)。角色通过 DSH 根级浮层显示，切换工作区 / 会话时保留舞台；已接入完整 PMX、原生动作 / Morph 预览和可选物理。HAST 标准姿态适配及主线表现意图尚未接入。
 
 主线按天安全换段、有限交接和跨段回执恢复已实现，见 [分段方案](docs/08-长期身份与Session分段.md)。整理模型始终使用同一个长期私有 Session。已确认内容与保留项见 [决策清单](docs/09-决策状态与未决项.md)。
 
@@ -57,6 +57,10 @@ dsh --profile liveseed-dev --from-default-profile web --patch E:/works/LiveSeed/
 
 打开 DSH 后点击「德谬歌」入口。默认使用 DSH 当前默认模型；也可以在插件配置中同时指定 `provider` 和 `model`。模型凭据继续由宿主管理。未配置模型时可以查看历史，发送会提示先配置模型。
 
+角色默认从项目 `CharacterModel/` 加载，该目录不提交或分发；可在宿主插件配置用绝对 `characterDir` 指定另一个自有目录。重启开发 DSH 并刷新页面后可看到常驻角色，在德谬歌设置 → 角色中预览动作、表情及物理。实际模型验收为 `pnpm test:character`（同样需要 `LIVESEED_DSH_ROOT`），全部截图只写 `.local`。
+
+显示大小支持 25%–600%，可用“上半身构图”或顶部把手将下半身移出页面。舞台以约 60fps 为目标，只渲染页面可见部分；可选物理在网页 Worker 中运行。固定版本的逐骨回写适配与本机短时性能记录见 [验收说明](docs/19-PMX常驻舞台首版与验收.md)。
+
 整理模型可用 `memoryProvider` / `memoryModel` 绑定宿主已有 DeepSeek 路由；省略则沿用宿主默认模型，因此应先在宿主选择 DeepSeek。调用与主线使用不同的私有 Context 和 Session。默认 8 条话语来源或空闲 60 秒合批，参数及能力边界见模块说明。
 
 包分发使用 `pnpm pack --pack-destination .local/releases`。根目录 `cordis.patch.yml` 默认禁用插件：在目标 profile 安装后，设置绝对路径 `stateDir` 再启用。包加载与本地覆盖层不要重复启用，也不要让两个实例同时使用同一 `stateDir`。本次没有安装到现用 DSH。
@@ -69,6 +73,7 @@ src/core/memory/              记忆 schema、提交折叠、召回与设计依�
 src/adapters/harness/         原生运行服务、模型桥、Remote 与日志投影
 src/client/panel.tsx          右上角会话菜单与消息视图
 src/client/composer.tsx       原生输入框与专属 Remote 提交适配
+src/client/character/         PMX 常驻舞台、原生预览、设置与实现边界
 scripts/build-client.mjs      DSH 客户端模块打包
 scripts/testing/              合成模型、集成测试与隔离 Web 验收
 scripts/probes/               前期接口实验，不是产品启动器

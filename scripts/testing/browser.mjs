@@ -24,7 +24,7 @@ let followFrames = 0;
 async function start(fresh) {
   output = '';
   const args = [cli, '--profile', 'liveseed-acceptance', ...(fresh ? ['--from-default-profile', 'web'] : []), '--patch', resolve('examples/acceptance.cordis.patch.yml'), '--port', String(port), '--no-open'];
-  child = spawn(process.execPath, args, { cwd: resolve('.'), windowsHide: true, env: { ...process.env, DSH_HOME: join(folder, 'home'), LIVESEED_TEST_DATA: join(folder, 'companion') }, stdio: ['ignore', 'pipe', 'pipe'] });
+  child = spawn(process.execPath, args, { cwd: resolve('.'), windowsHide: true, env: { ...process.env, DSH_HOME: join(folder, 'home'), LIVESEED_TEST_DATA: join(folder, 'companion'), LIVESEED_TEST_CHARACTER_DIR: join(folder, 'no-character') }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', data => { output += String(data); }); child.stderr.on('data', data => { output += String(data); });
   const until = Date.now() + 60000;
   while (Date.now() < until) {
