@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { useSyncExternalStore } from 'react';
+import type { MotionTrack } from './tracks.js';
 import type { CharacterCatalog } from '../../core/character.js';
 import { constrainHandle, MIN_SCALE, MAX_SCALE, stageSize } from './layout.js';
 
@@ -13,11 +14,12 @@ export interface CharacterView {
   catalog?: CharacterCatalog; settings: CharacterSettings; status: 'loading' | 'ready' | 'error' | 'unavailable';
   message: string; diagnostics?: CharacterDiagnostics; selectedMorph: string; morphWeight: number;
   clipName: string;
+  motionNames?: Partial<Record<MotionTrack,string>>;
   physicsState: 'off' | 'loading' | 'on' | 'error';
   generation: number;
 }
 export interface StageDriver {
-  gesture(name: Gesture): void; clip(name?: string): void; morph(name: string, weight: number): void; clearMorphs(): void;
+  gesture(name: Gesture): void; clip(name?: string, track?: MotionTrack): void; morph(name: string, weight: number): void; clearMorphs(): void;
 }
 const KEY = 'liveseed.character.stage.v1';
 const initial: CharacterSettings = { visible: true, scale: 1, x: 24, y: 24, modelId: '', physics: false };
@@ -72,6 +74,9 @@ export class CharacterController {
     this.ctx.logger.warn('Character stage failed: %s', error instanceof Error ? error.message : 'unknown error');
     this.publish({ status: 'error', message });
   }
+  motions(names:Partial<Record<MotionTrack,string>>):void {
+    if(JSON.stringify(names)!==JSON.stringify(this.view.motionNames))this.publish({motionNames:names});
+  }
   physics(state: CharacterView['physicsState']): void { this.publish({ physicsState: state }); }
   retry(): void {
     this.clearMorphs(); this.publish({ status: 'loading', message: '', generation: this.view.generation + 1 });
@@ -79,7 +84,7 @@ export class CharacterController {
   }
   attach(driver: StageDriver): () => void { this.driver = driver; return () => { if (this.driver === driver) this.driver = undefined; }; }
   gesture(name: Gesture): void { this.driver?.gesture(name); }
-  clip(name?: string): void { this.driver?.clip(name); this.publish({ clipName: name ?? '' }); }
+  clip(name?: string, track?: MotionTrack): void { this.driver?.clip(name,track); this.publish({ clipName: name ?? '' }); }
   morph(name: string, weight = this.view.morphWeight): void {
     this.driver?.morph(this.view.selectedMorph, 0);
     this.driver?.morph(name, weight);

@@ -7,6 +7,7 @@ import { initializePhysics } from './physics.js';
 import { FramePacer } from './timing.js';
 import { CharacterMMDHelper } from './helper.js';
 import type { CharacterController, CharacterDiagnostics, Gesture, StageDriver } from './controller.js';
+import type { MotionTrack } from './tracks.js';
 import { characterClips } from './clips.js';
 
 export class CharacterRenderer implements StageDriver {
@@ -78,7 +79,7 @@ export class CharacterRenderer implements StageDriver {
     const center = bounds.getCenter(new Vector3());
     this.camera.position.set(center.x, center.y, center.z + this.height * 2);
     this.camera.lookAt(center); this.camera.far = this.height * 6;
-    this.pose = new NativePose(mesh, this.height);
+    this.pose = new NativePose(mesh, this.height, true);
     this.helper.add(mesh, { animation: this.pose.base, physics: false });
     this.bindPoseInput();
     this.detach = this.controller.attach(this);
@@ -177,6 +178,7 @@ export class CharacterRenderer implements StageDriver {
       this.renderer.domElement.dataset.characterFrames = String(this.frames);
       if (this.diagnosticsDirty || time - this.diagnosticAt > 500) {
         this.diagnosticsDirty = false; this.diagnosticAt = time;
+        this.controller.motions(this.pose?.motionNames() ?? {});
         this.renderer.domElement.dataset.characterMorphWeight = String(Math.max(0, ...(this.mesh?.morphTargetInfluences ?? [])));
         this.renderer.domElement.dataset.characterMorphName = this.controller.snapshot().selectedMorph;
         this.renderer.domElement.dataset.characterFinite = String(this.mesh?.skeleton.bones.every(bone => [...bone.position.toArray(), ...bone.quaternion.toArray()].every(Number.isFinite)));
@@ -197,7 +199,14 @@ export class CharacterRenderer implements StageDriver {
     } finally { this.busy = false; this.schedule(); }
   }
   gesture(name: Gesture): void { this.pose?.gesture(name); this.diagnosticsDirty = true; }
-  clip(name?: string): void { if (!name) { this.pose?.stopClip(); return; } const clip = characterClips[name]; if (clip) this.pose?.playClip(clip); }
+  clip(name?: string, track?: MotionTrack): void {
+    if(!name){this.pose?.stopClip(track);return;}
+    const clip=characterClips[name];if(!clip)return;
+    if(['gentle-nod','soft-shake','thoughtful-look','listening-lean','side-glance'].includes(name)&&!this.pose?.clipActive('hands')){
+      this.pose?.playClip(characterClips['behind-rest']!,'hands');
+    }
+    this.pose?.playClip(clip,track);
+  }
   morph(name: string, weight: number): void { this.pose?.morph(name, weight); this.diagnosticsDirty = true; }
   clearMorphs(): void { this.pose?.clearMorphs(); this.diagnosticsDirty = true; }
   private releaseMesh(): void {

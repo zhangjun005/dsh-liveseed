@@ -1,7 +1,8 @@
 import { AnimationClip, Bone, QuaternionKeyframeTrack, VectorKeyframeTrack, Vector3, Quaternion } from 'three';
 import type { MMDMesh } from '@takahirox/three-mmd';
 import type { Gesture } from './controller.js';
-import { sampleClip, type CharacterClip } from './clips.js';
+import { motionTracks, trackMask, type MotionTrack } from './tracks.js';
+import { sampleClip, sampleClipPositions, type CharacterClip } from './clips.js';
 
 /** Small native-PMX calibration driver. Derived bones, D chains and physics bones remain owned by MMD. */
 export class NativePose {
@@ -19,7 +20,7 @@ export class NativePose {
   private readonly controlled = ['上半身', '上半身1', '上半身2', '下半身', '首', '頭', '両目', '右腕', '右ひじ', '右手首', '左腕', '左ひじ', '左手首', 'センター', '左足ＩＫ'];
   readonly base: AnimationClip;
   readonly height: number;
-  constructor(private readonly mesh: MMDMesh, height: number) {
+  constructor(private readonly mesh: MMDMesh, height: number, private readonly relaxedIdle = false) {
     this.height = height;
     mesh.updateMatrixWorld(true);
     mesh.skeleton.bones.forEach((bone, i) => this.indices.set(bone.name, i));
@@ -63,7 +64,8 @@ export class NativePose {
       // Targets are measured limb directions in torso space, not rotations about assumed PMX XYZ axes.
       // Keep wrists outside the coat and slightly forward instead of pressing both hands into the body.
       const upper = new Vector3(sign * .58, -.8, .15).normalize().lerp(new Vector3(sign * .85, .18, .5).normalize(), amount).normalize().applyQuaternion(torso);
-      const forearm = new Vector3(sign * .36, -.86, .36).normalize().lerp(new Vector3(sign * .05, .92, .38).normalize(), amount).normalize().applyQuaternion(torso);
+      // Tilt the raised forearm gently toward the head rather than straight up/out.
+      const forearm = new Vector3(sign * .36, -.86, .36).normalize().lerp(new Vector3(-sign * .18, .92, .38).normalize(), amount).normalize().applyQuaternion(torso);
       this.aim(arm, elbow, upper);
       this.aim(elbow, hand, forearm);
       const palm = this.palmAxes.get(side);
@@ -93,11 +95,33 @@ export class NativePose {
     if (weight <= 0) this.overrides.delete(index); else this.overrides.set(index, Math.min(1, weight));
   }
   clearMorphs(): void { this.overrides.clear(); }
-  private clipLayer: { clip: CharacterClip; time: number; weight: number; releasing: boolean } | undefined;
-  /** Play a baked clip over the authored baseline. The clip never replaces the baseline outright. */
-  playClip(clip: CharacterClip): void { this.clipLayer = { clip, time: 0, weight: 0, releasing: false }; }
-  stopClip(): void { if (this.clipLayer) this.clipLayer.releasing = true; }
-  clipActive(): boolean { return this.clipLayer !== undefined; }
+  private readonly clipLayers = new Map<MotionTrack, { clip: CharacterClip; time: number; weight: number; releasing: boolean; exiting?: boolean; frozen?: boolean }[]>();
+  /** A full recipe can start several tracks; a selected component touches only that track. */
+  playClip(clip: CharacterClip, track?: MotionTrack): void {
+    for (const part of track ? [track] : motionTracks) {
+      const mask=trackMask(clip,part);if(!mask.length)continue;
+      const layers=this.clipLayers.get(part) ?? [];
+      // Freeze outgoing samples during crossfade, preserving continuity on interruption.
+      for(const layer of layers){layer.releasing=true;layer.frozen=true;}
+      layers.push({clip:{...clip,mask},time:0,weight:0,releasing:false});
+      this.clipLayers.set(part,layers);
+    }
+  }
+  stopClip(track?: MotionTrack): void {
+    for(const part of track ? [track] : motionTracks)for(const layer of this.clipLayers.get(part) ?? []){
+      if(layer.releasing)continue;
+      if(layer.clip.holdAt !== undefined && !layer.exiting){
+        if(layer.time<layer.clip.holdAt){layer.exiting=true;layer.releasing=true;}
+        else {layer.time=layer.clip.releaseFrom ?? layer.time;layer.exiting=true;}
+      }else layer.releasing=true;
+    }
+  }
+  clipActive(track?: MotionTrack): boolean {
+    return (track ? [track] : motionTracks).some(part=>(this.clipLayers.get(part)?.length ?? 0)>0);
+  }
+  motionNames(): Partial<Record<MotionTrack,string>> {
+    return Object.fromEntries(motionTracks.flatMap(part=>{const layers=this.clipLayers.get(part) ?? [];const layer=layers.at(-1);return layer?[[part,layer.clip.name]]:[];}));
+  }
   apply(dt: number): void {
     this.restore();
     this.authored(dt);
@@ -109,23 +133,75 @@ export class NativePose {
     this.mesh.skeleton.bones.forEach((bone, i) => { bone.quaternion.copy(this.neutral[i]!.rotation); bone.position.copy(this.neutral[i]!.position); });
   }
   private applyClip(dt: number): void {
-    const layer = this.clipLayer;
-    if (!layer) return;
-    layer.time += dt;
-    const fade = .25;
-    if (!layer.releasing && layer.time > layer.clip.duration - fade) layer.releasing = true;
-    layer.weight = layer.releasing ? Math.max(0, layer.weight - dt / fade) : Math.min(1, layer.weight + dt / fade);
-    if (layer.weight <= 0) { this.clipLayer = undefined; return; }
-    for (const [name, target] of sampleClip(layer.clip, layer.time)) {
-      const index = this.indices.get(name);
-      if (index === undefined) continue;
-      this.mesh.skeleton.bones[index]!.quaternion.slerp(target, layer.weight);
+    for(const part of motionTracks){
+      const layers=this.clipLayers.get(part) ?? [];
+      for(const layer of layers){
+        if(!layer.frozen)layer.time+=dt;
+        if(layer.clip.holdAt!==undefined&&!layer.exiting)layer.time=Math.min(layer.time,layer.clip.holdAt);
+        if(!layer.releasing&&layer.time>layer.clip.duration-.25)layer.releasing=true;
+        layer.weight=layer.releasing?Math.max(0,layer.weight-dt/.25):Math.min(1,layer.weight+dt/.25);
+      }
+      this.clipLayers.set(part,layers.filter(layer=>layer.weight>0));
+    }
+    const handWeight=Math.min(1,(this.clipLayers.get('hands') ?? []).reduce((sum,layer)=>sum+layer.weight,0));
+    if(this.relaxedIdle&&this.active!=='wave')this.relaxArms(1-handWeight);
+    for(const part of motionTracks){
+      const layers=this.clipLayers.get(part) ?? [];
+      const total=layers.reduce((sum,layer)=>sum+layer.weight,0);
+      // Blend local deltas once per bone, rather than multiplying two competing poses.
+      const inputs=new Map<string,{rotation:Quaternion;position:Vector3;weight:number}>();
+      for(const layer of layers){
+        const weight=layer.weight/Math.max(1,total);
+        for(const [name,target] of sampleClip(layer.clip,layer.time)){
+          const reference=layer.clip.frames[0]?.rotations[name];
+          if(!reference||layer.clip.reference!=='clip-first-frame')continue;
+          const delta=new Quaternion(...reference).normalize().invert().multiply(target);
+          const input=inputs.get(name) ?? {rotation:new Quaternion(0,0,0,0),position:new Vector3(),weight:0};
+          // Hemisphere-corrected linear quaternion blend, normalized after all layers.
+          input.weight+=weight;
+          const sign=delta.w<0?-1:1;
+          input.rotation.x+=delta.x*weight*sign;input.rotation.y+=delta.y*weight*sign;
+          input.rotation.z+=delta.z*weight*sign;input.rotation.w+=delta.w*weight*sign;
+          inputs.set(name,input);
+        }
+        for(const [name,target] of sampleClipPositions(layer.clip,layer.time)){
+          const input=inputs.get(name) ?? {rotation:new Quaternion(0,0,0,0),position:new Vector3(),weight:0};
+          const reference=layer.clip.frames[0]?.positions?.[name];if(reference)target.sub(new Vector3(...reference));
+          input.position.addScaledVector(target,weight);inputs.set(name,input);
+        }
+      }
+      for(const [name,input] of inputs){const bone=this.bone(name);if(!bone)continue;
+        input.rotation.w+=Math.max(0,1-input.weight);
+        bone.quaternion.multiply(input.rotation.normalize()).normalize();bone.position.add(input.position);
+      }
+    }
+  }
+  private relaxArms(weight:number):void {
+    if(weight<=0)return;
+    const torso=this.bone('上半身2')?.getWorldQuaternion(new Quaternion()) ?? new Quaternion();
+    for(const side of ['右','左']){
+      const arm=this.bone(side+'腕'),elbow=this.bone(side+'ひじ'),hand=this.bone(side+'手首');
+      if(!arm||!elbow||!hand)continue;
+      const originalArm=arm.quaternion.clone(),originalElbow=elbow.quaternion.clone();
+      const sign=side==='右'?-1:1;
+      this.mesh.updateMatrixWorld(true);
+      this.aim(arm,elbow,new Vector3(sign*.36,-.93,.07).normalize().applyQuaternion(torso));
+      this.mesh.updateMatrixWorld(true);
+      const horizontal=Math.hypot(.05,.16);
+      const angle=Math.atan2(horizontal,.985)+15*Math.PI/180;
+      this.aim(elbow,hand,new Vector3(sign*.05/horizontal*Math.sin(angle),-Math.cos(angle),.16/horizontal*Math.sin(angle)).applyQuaternion(torso));
+      const targetArm=arm.quaternion.clone(),targetElbow=elbow.quaternion.clone();
+      arm.quaternion.copy(originalArm).slerp(targetArm,weight);elbow.quaternion.copy(originalElbow).slerp(targetElbow,weight);
     }
   }
   /** Procedural baseline plus hand-authored gesture layers. */
   private authored(dt: number): void {
     this.time += dt;
-    this.turn('上半身2', .006 * Math.sin(this.time * 1.7));
+    // Default quiet breathing is always present beneath manual clips.
+    const breath=Math.sin(this.time * Math.PI * 2 / 4.8);
+    this.turn('上半身1', .004 * breath);
+    this.turn('上半身2', .008 * breath);
+    this.turn('首', -.002 * breath);
     const eye = this.bone('両目');
     if (eye) this.turn('両目', .025 * Math.sin(this.time * .6), .04 * Math.sin(this.time * .4));
     if (this.mesh.morphTargetInfluences) {

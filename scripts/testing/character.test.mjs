@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { CharacterAssets } from '../../dist/adapters/harness/character-assets.js';
 import { descriptors } from '../../dist/adapters/harness/remote-contract.js';
 import { NativePose } from '../../dist/client/character/pose.js';
-import { sampleClip, characterClips } from '../../dist/client/character/clips.js';
+import { sampleClip, sampleClipPositions, characterClips } from '../../dist/client/character/clips.js';
 import { AnimationMixer, Bone, BufferGeometry, MeshBasicMaterial, Skeleton, SkinnedMesh, Quaternion, Vector3 } from 'three';
 import { FramePacer } from '../../dist/client/character/timing.js';
 import { constrainHandle, stageSize, upperBodyFrame } from '../../dist/client/character/layout.js';
@@ -142,6 +142,137 @@ test('clip layer blends over the authored baseline and releases back without dri
   assert.ok(arm.quaternion.angleTo(baseArm) < 1e-4, 'release returns to the authored baseline');
 });
 
+test('clip reference is neutral on a nonidentity baseline and nod remains independent', () => {
+  const arm = new Bone(); arm.name = '右腕';
+  arm.quaternion.setFromAxisAngle(new Vector3(0, 0, 1), .65);
+  const head = new Bone(); head.name = '頭';
+  const mesh = new SkinnedMesh(new BufferGeometry(), new MeshBasicMaterial());
+  mesh.add(arm, head); mesh.bind(new Skeleton([arm, head]));
+  const pose = new NativePose(mesh, 20), baseline = arm.quaternion.clone();
+  const reference = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), .4);
+  const makeClip = delta => ({ name: 'test', fps: 30, duration: 2, mask: ['右腕'], reference: 'clip-first-frame', interpolation: 'sampled', source: {},
+    frames: Array.from({length: 61}, (_, i) => ({t: i/30, rotations: {'右腕': reference.clone().multiply(i ? delta : new Quaternion()).toArray()}})) });
+  pose.playClip(makeClip(new Quaternion()));
+  for (let i=0;i<30;i++) pose.apply(1/60);
+  assert.ok(arm.quaternion.angleTo(baseline)<1e-6, 'source rest must not replace calibrated baseline at full weight');
+  const delta = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), .25);
+  pose.playClip(makeClip(delta)); pose.gesture('nod');
+  for (let i=0;i<40;i++) pose.apply(1/60);
+  assert.ok(arm.quaternion.angleTo(baseline.clone().multiply(delta))<1e-6, 'local delta order is baseline * inverse(reference) * sample');
+  assert.ok(head.quaternion.angleTo(new Quaternion())>.01, 'head nod coexists with the arm clip');
+  pose.stopClip();
+  let previous = arm.quaternion.clone();
+  for (let i=0;i<60;i++) {
+    pose.apply(1/60);
+    assert.ok(previous.angleTo(arm.quaternion)<.04, 'stop fades continuously');
+    previous.copy(arm.quaternion);
+  }
+  assert.ok(arm.quaternion.angleTo(baseline)<1e-6, 'stop returns to the same nonidentity baseline');
+});
+
+test('behind-look has a bounded enter, hold and exit and can stop back to baseline', () => {
+  const clip = characterClips['hands-behind-look'];
+  assert.equal(clip.frames.length, 136);
+  const held=sampleClip(clip,2), reference=sampleClip(clip,0);
+  const torsoAngle=['上半身','上半身1','上半身2'].reduce((total,name)=>total+held.get(name).angleTo(reference.get(name)),0);
+  assert.ok(torsoAngle>.34 && torsoAngle<.42, 'visible forward lean is distributed across the torso');
+  const headDelta=reference.get('頭').clone().invert().multiply(held.get('頭'));
+  assert.ok(Math.abs(headDelta.z)>.06, 'held pose includes head tilt, not only counter-pitch');
+  assert.ok(!clip.mask.some(n=>/袖|捩|足|肩C|肩\+/.test(n)), 'only primary upper-body inputs');
+  for (const time of [0, .4, 1.7, 2.5, 3.8, 4.5]) {
+    for (const [name, q] of sampleClip(clip,time)) {
+      assert.ok(q.toArray().every(Number.isFinite));
+      if(time===4.5) assert.ok(q.angleTo(sampleClip(clip,0).get(name))<1e-6,'exit matches entry reference');
+    }
+  }
+  const bones=clip.mask.map(name=>{const b=new Bone();b.name=name;return b;});
+  const mesh=new SkinnedMesh(new BufferGeometry(),new MeshBasicMaterial());
+  bones.forEach(b=>mesh.add(b));mesh.bind(new Skeleton(bones));
+  const pose=new NativePose(mesh,20);
+  const controlMesh=new SkinnedMesh(new BufferGeometry(),new MeshBasicMaterial());
+  const controlBones=clip.mask.map(name=>{const b=new Bone();b.name=name;controlMesh.add(b);return b;});
+  controlMesh.bind(new Skeleton(controlBones));
+  const controlPose=new NativePose(controlMesh,20);
+  const step=()=>{pose.apply(1/60);controlPose.apply(1/60);};
+  pose.apply(0);controlPose.apply(0);
+  for(const stopAt of [.3,1.8,3.6]) {
+    pose.playClip(clip);
+    for(let t=0;t<stopAt;t+=1/60)step();
+    const torso=bones.find(b=>b.name==='上半身');
+    assert.ok(torso.quaternion.toArray().every(Number.isFinite));
+    pose.stopClip();for(let i=0;i<120;i++)step();
+    assert.ok(!pose.clipActive());
+    bones.forEach((b,i)=>assert.ok(b.quaternion.angleTo(controlBones[i].quaternion)<1e-6,'stopping returns to the current animated baseline'));
+  }
+});
+
+test('reaction candidates enter and return continuously, preserve unrelated channels and stop cleanly', () => {
+  for(const id of ['behind-curious','side-glance','soft-open','gentle-nod']) {
+    const clip=characterClips[id];
+    assert.equal(clip.frames.length,Math.round(clip.duration*clip.fps)+1);
+    assert.ok(!clip.mask.some(n=>/袖|捩|足|肩C|肩\+/.test(n)));
+    const start=sampleClip(clip,0),end=sampleClip(clip,clip.duration);
+    for(const [name,q] of start)assert.ok(q.angleTo(end.get(name))<1e-6,id+' closes its reference pose');
+    let previous=start,maxStep=0;
+    for(let i=1;i<clip.frames.length;i++){
+      const next=sampleClip(clip,i/30);
+      for(const [name,q] of next){assert.ok(q.toArray().every(Number.isFinite));maxStep=Math.max(maxStep,q.angleTo(previous.get(name)));}
+      previous=next;
+    }
+    assert.ok(maxStep>.0001 && maxStep<.2,id+' has a moving, bounded trajectory');
+    const make=()=>{
+      const mesh=new SkinnedMesh(new BufferGeometry(),new MeshBasicMaterial());
+      const bones=[...clip.mask,'右足D'].map(name=>{const b=new Bone();b.name=name;mesh.add(b);return b;});
+      mesh.bind(new Skeleton(bones));return {pose:new NativePose(mesh,20),bones};
+    };
+    const actor=make(),control=make();
+    actor.pose.playClip(clip);
+    for(let i=0;i<50;i++){actor.pose.apply(1/60);control.pose.apply(1/60);}
+    actor.pose.stopClip();
+    for(let i=0;i<60;i++){actor.pose.apply(1/60);control.pose.apply(1/60);}
+    assert.ok(!actor.pose.clipActive());
+    actor.bones.forEach((b,i)=>assert.ok(b.quaternion.angleTo(control.bones[i].quaternion)<1e-6,id+' releases to live baseline'));
+  }
+});
+
+test('contact, response and foot clips stay bounded and displacement tracks release without drift', () => {
+  for(const id of ['soft-shake','thoughtful-look','listening-lean','hands-front','hand-on-chest','chin-rest','touch-hair','weight-shift','leg-sway']) {
+    const clip=characterClips[id];
+    assert.equal(clip.frames.length,Math.round(clip.duration*30)+1);
+    const start=sampleClip(clip,0),end=sampleClip(clip,clip.duration);
+    for(const [n,q] of end)assert.ok(q.angleTo(start.get(n))<1e-6,id+' closes its rotation');
+    let previous=start;
+    for(let i=1;i<clip.frames.length;i++){
+      const next=sampleClip(clip,i/30);
+      for(const [n,q] of next){assert.ok(q.toArray().every(Number.isFinite));assert.ok(previous.get(n).angleTo(q)<.25,id+' bounded adjacent rotations');}
+      for(const p of sampleClipPositions(clip,i/30).values())assert.ok(p.toArray().every(Number.isFinite)&&p.length()<1,'small relative translation only');
+      previous=next;
+    }
+    for(const p of sampleClipPositions(clip,clip.duration).values())assert.ok(p.length()<1e-6,'translations close');
+    const names=[...new Set([...clip.mask,'右足D'])];
+    const create=()=>{const m=new SkinnedMesh(new BufferGeometry(),new MeshBasicMaterial());const b=names.map(name=>{const bone=new Bone();bone.name=name;m.add(bone);return bone;});m.bind(new Skeleton(b));return {b,pose:new NativePose(m,20)};};
+    const a=create(),control=create();a.pose.playClip(clip);
+    for(let i=0;i<90;i++){a.pose.apply(1/60);control.pose.apply(1/60);}
+    if(id==='leg-sway')assert.ok(a.b[names.indexOf('左足ＩＫ')].position.y>.01,'swing targets lift');
+    a.pose.stopClip();for(let i=0;i<120;i++){a.pose.apply(1/60);control.pose.apply(1/60);}
+    a.b.forEach((b,i)=>{assert.ok(b.position.distanceTo(control.b[i].position)<1e-6);assert.ok(b.quaternion.angleTo(control.b[i].quaternion)<1e-6);});
+  }
+});
+
+test('back pose holds until explicitly released and has no exit jump', () => {
+  const clip=characterClips['behind-rest'];
+  const mesh=new SkinnedMesh(new BufferGeometry(),new MeshBasicMaterial());
+  const bones=clip.mask.map(name=>{const b=new Bone();b.name=name;mesh.add(b);return b;});mesh.bind(new Skeleton(bones));
+  const pose=new NativePose(mesh,20);pose.playClip(clip);
+  for(let i=0;i<900;i++)pose.apply(1/60);
+  assert.ok(pose.clipActive(),'persists beyond normal clip duration');
+  const arm=bones.find(b=>b.name==='右腕'),before=arm.quaternion.clone();
+  pose.stopClip();pose.apply(1/60);
+  assert.ok(before.angleTo(arm.quaternion)<.02,'release follows exit from held pose');
+  for(let i=0;i<120;i++)pose.apply(1/60);
+  assert.ok(!pose.clipActive());
+});
+
 test('native pose input returns to baseline without drift and leaves dependent bones to MMD', () => {
   const names = ['センター', '上半身', '上半身1', '上半身2', '首', '頭', '両目', '左足ＩＫ', '右足D'];
   const bones = names.map(name => { const bone = new Bone(); bone.name = name; return bone; });
@@ -165,4 +296,39 @@ test('native pose input returns to baseline without drift and leaves dependent b
   for(let i=0;i<180;i++) step();
   assert.ok(Math.abs(bones[names.indexOf('左足ＩＫ')].position.y)<1e-6);
   assert.ok(bones.every(bone => [...bone.position.toArray(),...bone.quaternion.toArray()].every(Number.isFinite)));
+});
+
+
+test('three motion tracks compose, stop independently and preserve a held hand pose', () => {
+  const names=[...new Set(['behind-rest','soft-shake','tiptoe-rock'].flatMap(id=>characterClips[id].mask))];
+  const create=()=>{const mesh=new SkinnedMesh(new BufferGeometry(),new MeshBasicMaterial());const bones=names.map(n=>{const b=new Bone();b.name=n;mesh.add(b);return b;});mesh.bind(new Skeleton(bones));return {pose:new NativePose(mesh,20),bones};};
+  const actor=create(),hand=create(),head=create(),body=create();
+  actor.pose.playClip(characterClips['behind-rest'],'hands');hand.pose.playClip(characterClips['behind-rest'],'hands');
+  actor.pose.playClip(characterClips['soft-shake'],'head');head.pose.playClip(characterClips['soft-shake'],'head');
+  actor.pose.playClip(characterClips['tiptoe-rock'],'body');body.pose.playClip(characterClips['tiptoe-rock'],'body');
+  for(let i=0;i<90;i++)for(const x of [actor,hand,head,body])x.pose.apply(1/60);
+  for(const [bone,control] of [['右腕',hand],['頭',head],['センター',body],['左足ＩＫ',body]]){
+    const i=names.indexOf(bone);assert.ok(actor.bones[i].quaternion.angleTo(control.bones[i].quaternion)<1e-6,bone+' matches independent track');assert.ok(actor.bones[i].position.distanceTo(control.bones[i].position)<1e-6);
+  }
+  actor.pose.stopClip('body');for(let i=0;i<60;i++)actor.pose.apply(1/60);
+  assert.ok(actor.pose.clipActive('hands'));assert.ok(!actor.pose.clipActive('body'));
+  actor.pose.stopClip();for(let i=0;i<150;i++)actor.pose.apply(1/60);assert.ok(!actor.pose.clipActive());
+});
+
+test('same-track interruption crossfades continuously and does not cancel other tracks', () => {
+  const names=['右腕','右ひじ','右手首','左腕','左ひじ','左手首','頭','首'];
+  const mesh=new SkinnedMesh(new BufferGeometry(),new MeshBasicMaterial());const bones=names.map(n=>{const b=new Bone();b.name=n;mesh.add(b);return b;});mesh.bind(new Skeleton(bones));const pose=new NativePose(mesh,20);
+  pose.playClip(characterClips['behind-rest'],'hands');pose.playClip(characterClips['soft-shake'],'head');for(let i=0;i<90;i++)pose.apply(1/60);
+  let previous=bones.map(b=>b.quaternion.clone());pose.playClip(characterClips['hands-front'],'hands');
+  for(let i=0;i<60;i++){pose.apply(1/60);bones.forEach((b,j)=>assert.ok(previous[j].angleTo(b.quaternion)<.24,'bounded switch '+b.name));previous=bones.map(b=>b.quaternion.clone());}
+  assert.ok(pose.clipActive('head'),'head survives hand replacement');
+});
+
+test('tiptoe-rock controls only body and IK targets, has anchored exits and no head or hand claims', () => {
+  const clip=characterClips['tiptoe-rock'];assert.ok(clip.mask.includes('右足ＩＫ')&&clip.mask.includes('左つま先ＩＫ'));
+  assert.ok(!clip.mask.some(n=>/手|腕|首|頭|袖|足D/.test(n)));
+  const start=sampleClip(clip,0),end=sampleClip(clip,clip.duration);
+  for(const [name,q]of end)assert.ok(q.angleTo(start.get(name))<1e-6);
+  for(const p of sampleClipPositions(clip,clip.duration).values())assert.ok(p.length()<1e-6);
+  const raised=sampleClipPositions(clip,2);assert.ok(raised.get('センター').y>.05);assert.ok(raised.get('左足ＩＫ').y>0);
 });

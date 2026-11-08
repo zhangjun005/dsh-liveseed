@@ -70,16 +70,17 @@ for (let frame = 0; frame <= maxFrame; frame++) {
     const a = list[index];
     const b = list[Math.min(index + 1, list.length - 1)];
     const span = b.frameNum - a.frameNum;
-    const ratio = span > 0 ? (frame - a.frameNum) / span : 0;
+    const ratio = span > 0 ? Math.max(0, Math.min(1, (frame - a.frameNum) / span)) : 0;
     const qa = new Quaternion(...a.rotation).normalize();
     const qb = new Quaternion(...b.rotation).normalize();
-    const q = qa.clone().slerp(qb, eased(ratio, channelPoints(a.interpolation, 3)));
+    // MMD stores the incoming segment's curve on its destination key.
+    const q = qa.clone().slerp(qb, eased(ratio, channelPoints(b.interpolation, 3)));
     rotations[bone] = q.toArray().map(value => +value.toFixed(6));
     const pa = new Vector3(...a.position), pb = new Vector3(...b.position);
     if (pa.lengthSq() > 0 || pb.lengthSq() > 0) {
       const position = new Vector3();
       for (let axis = 0; axis < 3; axis++) {
-        const easedRatio = eased(ratio, channelPoints(a.interpolation, axis));
+        const easedRatio = eased(ratio, channelPoints(b.interpolation, axis));
         position.setComponent(axis, pa.getComponent(axis) + (pb.getComponent(axis) - pa.getComponent(axis)) * easedRatio);
       }
       if (position.lengthSq() > 0) positions[bone] = position.toArray().map(value => +value.toFixed(6));
